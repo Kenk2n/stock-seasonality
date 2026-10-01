@@ -109,3 +109,18 @@ def test_validate_similar_detects_shared_pattern():
         cands[f"N{i}"] = make_prices("2015-01-01", "2025-12-31", seed=100 + i)
     v = patterns.validate_similar("REF", cands, pd.Timestamp("2023-12-31"), top=5, min_dollar_volume=0)
     assert v["top"] > v["random"] + 0.1
+
+
+def test_rangebound_prefers_oscillator_over_trend():
+    from seasonality import rangebound as rb
+
+    idx = pd.bdate_range("2021-01-01", periods=1300)
+    t = np.arange(1300)
+    rng = np.random.default_rng(0)
+    osc = pd.Series(50 * np.exp(0.35 * np.sin(2 * np.pi * t / 160) + rng.normal(0, 0.01, 1300)), index=idx)
+    trend = pd.Series(50 * np.exp(0.0015 * t + 0.1 * np.sin(2 * np.pi * t / 160)), index=idx)
+    mo, mt = rb.range_metrics(osc), rb.range_metrics(trend)
+    assert mo["legs"] >= 10 and mo["trend_ratio"] < 0.2
+    assert mt["trend_ratio"] > 0.8
+    assert rb.range_score(mo) > rb.range_score(mt)
+    assert rb.box_status(-0.1) == "박스 아래" and rb.box_status(1.5) == "상단 돌파"
