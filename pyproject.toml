@@ -1,0 +1,9 @@
+[project]
+name = "stock-seasonality"
+version = "0.1.0"
+description = "미국 주식 계절성 탐색기"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
