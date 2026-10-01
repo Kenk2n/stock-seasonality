@@ -52,6 +52,19 @@ python earnings_scan.py KRUS --min-mcap 1e9 --min-dollar-volume 2e7   # 더 큰 
 - 비교 항목: 실적 반응 크기(평소 대비 배수), 1년 출렁임 중 실적 3일 비중, 고점·저점과 실적일 일치, 실적 전 상승 확률, 변동성.
 - `--validate`: 2년 전까지 데이터로만 고른 상위 20개가 최근 2년에도 같은 성격을 유지했는지 확인합니다.
 
+## 매집 흔적 스캐너 (+ 백테스트)
+
+주가·거래량에 남는 매집 흔적(주가 대비 거래량 쏠림, CMF, 흡수형 대량거래, 변동성 수축)과
+기관 보유 변화·내부자 매수·공매도 비율로 후보를 뽑고, 같은 방법이 과거에 통했는지 검증합니다.
+
+```bash
+python accumulation_scan.py --backtest                  # 나스닥
+python accumulation_scan.py --exchanges us --backtest   # 나스닥 + NYSE
+```
+
+> 2022.11~2026.6 검증 결과 이 흔적들은 이후 3개월 수익률을 예측하지 못했습니다 (상위 30개가 시장보다 −0.5~−1.1%).
+> 2025.1~2026.6 내부자 장내 매수 1,986건도 이후 성과가 정확히 평균이었습니다. 후보 목록은 참고용입니다.
+
 ## 설치
 
 ```bash
@@ -133,6 +146,7 @@ app.py                     Streamlit 웹 앱
 scan.py                    터미널 스캐너 (월별 계절성)
 analyze.py                 차트 패턴 리포트 + 유사 종목 찾기
 earnings_scan.py           실적 주기 패턴이 비슷한 종목 찾기
+accumulation_scan.py       매집 흔적 스캐너 + 백테스트
 src/seasonality/
   data.py                  다운로드 + parquet 캐시 + 증분 업데이트
   universe.py              나스닥 100 목록, 나스닥 전체 목록 받기

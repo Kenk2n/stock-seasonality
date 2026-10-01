@@ -199,3 +199,53 @@ def update_many(
                 result[t] = need_update[t]
 
     return result
+
+
+# ------------------------------------------------------------------ 고가·저가 포함 (OHLCV)
+OHLC_CACHE_DIR = Path("data/ohlc")
+OHLC_COLUMNS = ["Open", "High", "Low", "Close", "Volume"]
+
+
+def update_ohlc(
+    tickers: Iterable[str],
+    period: str = "5y",
+    refresh: bool = False,
+    batch_size: int = 100,
+    pause: float = 0.5,
+    cache_dir: Path = OHLC_CACHE_DIR,
+    on_progress: Callable[[int, int], None] | None = None,
+) -> dict[str, pd.DataFrame]:
+    """시가·고가·저가·종가·거래량(수정주가). 매집 지표(CMF 등)에 고가·저가가 필요해서 따로 저장한다."""
+    import yfinance as yf
+
+    tickers = [t.upper() for t in tickers]
+    out: dict[str, pd.DataFrame] = {}
+    todo = []
+    for t in tickers:
+        p = Path(cache_dir) / f"{t}.parquet"
+        if p.exists() and not refresh:
+            out[t] = pd.read_parquet(p)
+        else:
+            todo.append(t)
+    Path(cache_dir).mkdir(parents=True, exist_ok=True)
+    for i in range(0, len(todo), batch_size):
+        batch = todo[i : i + batch_size]
+        raw = yf.download(batch, period=period, auto_adjust=True, group_by="ticker", progress=False, threads=True)
+        for t in batch:
+            try:
+                df = raw[t] if isinstance(raw.columns, pd.MultiIndex) else raw
+            except KeyError:
+                continue
+            df = df[[c for c in OHLC_COLUMNS if c in df.columns]].dropna(subset=["Close"])
+            if df.empty:
+                continue
+            df.index = pd.to_datetime(df.index).tz_localize(None)
+            df.index.name = "Date"
+            df = df.astype("float64")
+            df.to_parquet(Path(cache_dir) / f"{t}.parquet")
+            out[t] = df
+        if on_progress:
+            on_progress(min(i + batch_size, len(todo)), len(todo))
+        if pause:
+            time.sleep(pause)
+    return out
