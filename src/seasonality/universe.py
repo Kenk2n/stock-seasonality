@@ -84,3 +84,51 @@ def get_universe(name: str) -> list[str]:
     if name in ("us", "us_all"):
         return us_all()
     raise ValueError(f"알 수 없는 유니버스: {name} (nasdaq100, nasdaq, us 중 선택)")
+
+
+# 야후 거래소 코드
+NASDAQ_EXCHANGES = {"NMS", "NGM", "NCM"}   # Global Select, Global Market, Capital Market
+NYSE_EXCHANGES = {"NYQ", "ASE", "PCX"}     # NYSE, NYSE American, NYSE Arca
+
+
+def screen_universe(
+    min_market_cap: float = 3e8,
+    min_dollar_volume: float = 5e6,
+    min_price: float = 5.0,
+    exchanges: str = "nasdaq",
+) -> pd.DataFrame:
+    """야후 스크리너로 시가총액·거래대금 조건을 만족하는 미국 상장 보통주 목록.
+
+    반환 열: ticker, name, exchange, market_cap, price, dollar_volume (3개월 평균 거래대금)
+    exchanges: "nasdaq" | "nyse" | "us"(둘 다)
+    """
+    import yfinance as yf
+    from yfinance import EquityQuery as Q
+
+    query = Q("and", [Q("eq", ["region", "us"]), Q("gte", ["intradaymarketcap", min_market_cap])])
+    rows, offset = [], 0
+    while True:
+        r = yf.screen(query, size=250, offset=offset, sortField="intradaymarketcap", sortAsc=False)
+        quotes = r.get("quotes", [])
+        for x in quotes:
+            if x.get("quoteType") != "EQUITY":
+                continue
+            price = x.get("regularMarketPrice") or 0
+            rows.append({
+                "ticker": x.get("symbol"),
+                "name": x.get("shortName") or x.get("longName") or "",
+                "exchange": x.get("exchange"),
+                "market_cap": x.get("marketCap") or 0,
+                "price": price,
+                "dollar_volume": (x.get("averageDailyVolume3Month") or 0) * price,
+            })
+        offset += len(quotes)
+        if not quotes or offset >= r.get("total", 0):
+            break
+    df = pd.DataFrame(rows).drop_duplicates("ticker")
+    allowed = {"nasdaq": NASDAQ_EXCHANGES, "nyse": NYSE_EXCHANGES, "us": NASDAQ_EXCHANGES | NYSE_EXCHANGES}[exchanges]
+    df = df[df["exchange"].isin(allowed)]
+    df = df[df["ticker"].str.fullmatch(r"[A-Z]{1,5}")]
+    df = df[(df["dollar_volume"] >= min_dollar_volume) & (df["price"] >= min_price)]
+    df = df[~df["name"].str.contains(_SPECIAL, case=False, regex=True)]
+    return df.sort_values("market_cap", ascending=False).reset_index(drop=True)

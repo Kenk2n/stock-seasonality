@@ -37,6 +37,21 @@ python analyze.py HHH KRUS --similar --excess            # 소형주 지수(IWM)
 - **해마다 일치**: 최근 N년 중 그 해의 월별 흐름이 기준 종목 패턴과 같은 방향이었던 해의 비율.
   유사도가 높아도 이 값이 낮으면 한두 해의 큰 움직임 때문에 비슷해 보이는 것입니다.
 
+## 실적 주기 패턴이 비슷한 종목 찾기 (KRUS 같은 종목)
+
+달력(몇 월)이 아니라 **분기 실적 발표 때 크게 출렁이는** 종목을 찾습니다.
+
+```bash
+python earnings_scan.py KRUS --validate                       # 나스닥, 시총 $3억↑, 거래대금 $500만↑, 주가 $5↑
+python earnings_scan.py KRUS --exchanges us --validate        # 나스닥 + NYSE
+python earnings_scan.py KRUS --min-mcap 1e9 --min-dollar-volume 2e7   # 더 큰 종목만
+```
+
+- 종목 목록과 시총·거래대금은 야후 스크리너에서 한 번에 받고, 실적 발표일은 종목별로 받아 `data/earnings/` 에 저장합니다
+  (처음 1회 나스닥 약 5분, 미국 전체 약 10분).
+- 비교 항목: 실적 반응 크기(평소 대비 배수), 1년 출렁임 중 실적 3일 비중, 고점·저점과 실적일 일치, 실적 전 상승 확률, 변동성.
+- `--validate`: 2년 전까지 데이터로만 고른 상위 20개가 최근 2년에도 같은 성격을 유지했는지 확인합니다.
+
 ## 설치
 
 ```bash
@@ -117,6 +132,7 @@ python scan.py --demo                           # 네트워크 없이 동작 확
 app.py                     Streamlit 웹 앱
 scan.py                    터미널 스캐너 (월별 계절성)
 analyze.py                 차트 패턴 리포트 + 유사 종목 찾기
+earnings_scan.py           실적 주기 패턴이 비슷한 종목 찾기
 src/seasonality/
   data.py                  다운로드 + parquet 캐시 + 증분 업데이트
   universe.py              나스닥 100 목록, 나스닥 전체 목록 받기
