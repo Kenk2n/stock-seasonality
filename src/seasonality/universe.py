@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import io
+import logging
+import time
 import urllib.request
+from pathlib import Path
 
 import pandas as pd
+
+log = logging.getLogger(__name__)
 
 # 나스닥 100 구성 종목 (정기 리밸런싱으로 바뀌므로 필요하면 직접 수정하세요)
 NASDAQ100 = [
@@ -106,9 +111,28 @@ def screen_universe(
     from yfinance import EquityQuery as Q
 
     query = Q("and", [Q("eq", ["region", "us"]), Q("gte", ["intradaymarketcap", min_market_cap])])
+    cache = Path("data/universe") / f"screen_{int(min_market_cap)}.csv"
+
+    def screen_page(offset):
+        # 야후가 가끔 401(인증 쿠키 만료)을 주므로 몇 번 재시도
+        for attempt in range(4):
+            try:
+                return yf.screen(query, size=250, offset=offset, sortField="intradaymarketcap", sortAsc=False)
+            except Exception:
+                if attempt == 3:
+                    raise
+                time.sleep(2 ** attempt)
+
     rows, offset = [], 0
+    try:
+        _ = screen_page(0)
+    except Exception as e:
+        if cache.exists():
+            log.warning("야후 스크리너 실패(%s) → 저장해 둔 목록 사용: %s", e, cache)
+            return _filter_screen(pd.read_csv(cache), min_dollar_volume, min_price, exchanges)
+        raise
     while True:
-        r = yf.screen(query, size=250, offset=offset, sortField="intradaymarketcap", sortAsc=False)
+        r = screen_page(offset)
         quotes = r.get("quotes", [])
         for x in quotes:
             if x.get("quoteType") != "EQUITY":
@@ -126,6 +150,12 @@ def screen_universe(
         if not quotes or offset >= r.get("total", 0):
             break
     df = pd.DataFrame(rows).drop_duplicates("ticker")
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(cache, index=False)
+    return _filter_screen(df, min_dollar_volume, min_price, exchanges)
+
+
+def _filter_screen(df: pd.DataFrame, min_dollar_volume: float, min_price: float, exchanges: str) -> pd.DataFrame:
     allowed = {"nasdaq": NASDAQ_EXCHANGES, "nyse": NYSE_EXCHANGES, "us": NASDAQ_EXCHANGES | NYSE_EXCHANGES}[exchanges]
     df = df[df["exchange"].isin(allowed)]
     df = df[df["ticker"].str.fullmatch(r"[A-Z]{1,5}")]

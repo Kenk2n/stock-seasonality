@@ -60,6 +60,7 @@ python earnings_scan.py KRUS --min-mcap 1e9 --min-dollar-volume 2e7   # 더 큰 
 python range_scan.py --validate                 # 미국 전체, 최근 5년, 3 왕복 이상
 python range_scan.py --years 3                  # 최근 3년
 python range_scan.py --min-band 2 --min-legs 8  # 더 크게, 더 자주 왕복
+python range_scan.py --years 3,4,5 --min-legs 4 --bottom   # 지금 박스 하단 근처인 종목만
 ```
 
 박스 = 주봉 종가 하위 10%~상위 10% 가격대. 박스 하단(아래 20%)↔상단(위 20%) 횡단 횟수, 추세 없음,
