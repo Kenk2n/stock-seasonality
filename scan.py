@@ -43,6 +43,7 @@ def main() -> int:
     args = p.parse_args()
 
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(message)s")
+    logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 
     bench = None
     if args.demo:

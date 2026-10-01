@@ -219,6 +219,29 @@ def similar_table(sim: pd.DataFrame, names: dict[str, str] | None = None, top: i
     )
 
 
+def cycle_table(sim: pd.DataFrame, names: dict[str, str] | None = None, top: int = 20) -> str:
+    names = names or {}
+    ref = sim.attrs.get("reference")
+    rows = []
+    if ref:
+        rows.append(
+            f"<tr><td><b>기준</b></td><td></td><td></td><td>{ref['swings_per_year']:.1f}</td>"
+            f"<td>{_pct(ref['up_move'])}</td><td>{_pct(ref['down_move'])}</td><td>{ref['cycle_days']:.0f}일</td>"
+            f"<td>{ref['regularity']:.2f}</td></tr>"
+        )
+    for i, r in enumerate(sim.head(top).itertuples(), 1):
+        rows.append(
+            f"<tr><td>{i}. {html.escape(r.ticker)}</td><td style='text-align:left'>{html.escape(names.get(r.ticker, ''))}</td>"
+            f"<td>{r.distance:.2f}</td><td>{r.swings_per_year:.1f}</td><td>{_pct(r.up_move)}</td>"
+            f"<td>{_pct(r.down_move)}</td><td>{r.cycle_days:.0f}일</td><td>{r.regularity:.2f}</td></tr>"
+        )
+    return (
+        '<div class="tbl"><table><tr><th>종목</th><th style="text-align:left">이름</th><th>차이(작을수록 비슷)</th>'
+        "<th>연간 스윙 수</th><th>상승 구간 폭</th><th>하락 구간 폭</th><th>저점→저점 주기(거래일)</th><th>불규칙도</th></tr>"
+        + "".join(rows) + "</table></div>"
+    )
+
+
 def render_html(reports: list[TickerReport], title: str, intro: str = "",
                 extra_sections: list[tuple[str, str]] = (), inline_js: bool = False) -> str:
     """inline_js=True 면 plotly.js(약 4.6MB)를 파일 안에 넣어 인터넷 없이도 열린다."""

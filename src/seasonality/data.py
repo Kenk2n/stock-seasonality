@@ -37,6 +37,25 @@ def write_cache(ticker: str, df: pd.DataFrame, cache_dir: Path = DEFAULT_CACHE_D
     df.to_parquet(path)
 
 
+def _missing_path(cache_dir: Path) -> Path:
+    return Path(cache_dir) / "_missing.txt"
+
+
+def read_missing(cache_dir: Path = DEFAULT_CACHE_DIR) -> set[str]:
+    """예전에 받으려다 데이터가 없었던 종목 (상장폐지 등). 매번 다시 시도하지 않도록 기록."""
+    p = _missing_path(cache_dir)
+    return set(p.read_text().split()) if p.exists() else set()
+
+
+def _add_missing(tickers: Iterable[str], cache_dir: Path) -> None:
+    tickers = set(tickers)
+    if not tickers:
+        return
+    p = _missing_path(cache_dir)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("\n".join(sorted(read_missing(cache_dir) | tickers)))
+
+
 def _download(tickers: list[str], **kwargs) -> dict[str, pd.DataFrame]:
     """yfinance 로 여러 종목을 한 번에 받아 {종목: DataFrame[Close, Volume]} 로 돌려준다."""
     import yfinance as yf
@@ -109,10 +128,12 @@ def update_many(
     need_full: list[str] = []
     need_update: dict[str, pd.DataFrame] = {}
 
+    missing = set() if refresh else read_missing(cache_dir)
     for t in tickers:
         cached = read_cache(t, cache_dir)
         if cached is None:
-            need_full.append(t)
+            if t not in missing:
+                need_full.append(t)
         elif refresh:
             need_update[t] = cached
         else:
@@ -133,6 +154,7 @@ def update_many(
             result[t] = df
         for t in set(batch) - data.keys():
             log.warning("%s: 데이터 없음", t)
+        _add_missing(set(batch) - data.keys(), cache_dir)
         done += len(batch)
         if on_progress:
             on_progress(done, total)

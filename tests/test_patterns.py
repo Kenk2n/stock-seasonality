@@ -81,3 +81,31 @@ def test_earnings_reactions_and_distance():
     assert r["reaction"].iloc[0] == pytest.approx(0.2)
     sw = pd.DataFrame({"date": [p.index[25]], "kind": ["저점"]})
     assert earnings.swing_earnings_distance(sw, d).iloc[0] == (p.index[30] - p.index[25]).days
+
+
+def _wave(period_days, amp, n=1300, seed=0, phase=0.0):
+    rng = np.random.default_rng(seed)
+    t = np.arange(n)
+    logp = amp * np.sin(2 * np.pi * t / period_days + phase) + rng.normal(0, 0.01, n).cumsum() * 0.2
+    idx = pd.bdate_range("2021-01-01", periods=n)
+    return pd.DataFrame({"Close": 50 * np.exp(logp), "Volume": 1e6}, index=idx)
+
+
+def test_find_similar_cycles_prefers_same_rhythm():
+    ref = _wave(120, 0.35, seed=1)
+    cands = {"SAME": _wave(120, 0.35, seed=2, phase=1.0), "SLOW": _wave(400, 0.35, seed=3),
+             "FLAT": _wave(120, 0.05, seed=4)}
+    sim = patterns.find_similar_cycles(ref, cands, years=4, threshold=0.25, min_dollar_volume=0)
+    assert sim.iloc[0]["ticker"] == "SAME"
+    assert "FLAT" not in set(sim["ticker"])  # 25% 스윙이 거의 없어 제외
+
+
+def test_validate_similar_detects_shared_pattern():
+    eff = {3: -0.06, 4: -0.05, 11: 0.08}
+    cands = {"REF": make_prices("2015-01-01", "2025-12-31", monthly_effect=eff, seed=1)}
+    for i in range(5):
+        cands[f"TWIN{i}"] = make_prices("2015-01-01", "2025-12-31", monthly_effect=eff, seed=10 + i)
+    for i in range(30):
+        cands[f"N{i}"] = make_prices("2015-01-01", "2025-12-31", seed=100 + i)
+    v = patterns.validate_similar("REF", cands, pd.Timestamp("2023-12-31"), top=5, min_dollar_volume=0)
+    assert v["top"] > v["random"] + 0.1

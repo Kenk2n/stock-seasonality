@@ -379,3 +379,126 @@ def cycle_stats(swings: pd.DataFrame) -> dict:
         "n_up": len(up),
         "n_down": len(down),
     }
+
+
+# ------------------------------------------------------------------ 사이클(스윙) 모양으로 찾기
+def swing_signature(prices: pd.DataFrame | pd.Series, threshold: float, years: int = 5) -> dict | None:
+    """같은 되돌림 기준으로 본 '출렁임의 모양': 스윙 횟수, 상승·하락 폭, 주기, 규칙성.
+
+    KRUS 처럼 달력보다 '몇 달마다 크게 올랐다 크게 빠지는' 종목을 찾을 때 쓴다.
+    """
+    close = _close(prices)
+    if close.empty:
+        return None
+    since = close.index[-1] - pd.DateOffset(years=years)
+    if close.index[0] > since + pd.DateOffset(months=2):
+        return None
+    close = close[close.index > since]
+    sw = find_swings(close, threshold)
+    done = sw.iloc[:-1]
+    up = done[done["kind"] == "저점"]
+    down = done[done["kind"] == "고점"]
+    lows = sw[sw["kind"] == "저점"]["date"]
+    if len(up) < 2 or len(down) < 2 or len(lows) < 3:
+        return None
+    gaps = close.index.get_indexer(pd.DatetimeIndex(lows))
+    cyc = np.diff(gaps)
+    return {
+        "swings_per_year": len(sw) / years,
+        "up_move": float(up["move"].median()),
+        "down_move": float(down["move"].median()),
+        "cycle_days": float(np.median(cyc)),
+        "regularity": float(np.std(cyc) / np.mean(cyc)),  # 낮을수록 주기가 일정
+    }
+
+
+def _sig_vector(sig: dict) -> np.ndarray:
+    return np.array([
+        np.log(sig["swings_per_year"]),
+        np.log1p(sig["up_move"]),
+        np.log1p(-sig["down_move"]) if sig["down_move"] > -1 else -5,
+        np.log(sig["cycle_days"]),
+        sig["regularity"],
+    ])
+
+
+SIG_WEIGHTS = np.array([1.0, 1.0, 1.0, 1.0, 0.5])
+SIG_SCALES = np.array([0.35, 0.25, 0.20, 0.35, 0.25])  # 대략적인 '같은 모양'으로 볼 차이
+
+
+def find_similar_cycles(
+    reference: pd.DataFrame | pd.Series,
+    candidates: dict[str, pd.DataFrame],
+    years: int = 5,
+    threshold: float | None = None,
+    min_dollar_volume: float = 1e6,
+    min_price: float = 3.0,
+) -> pd.DataFrame:
+    """기준 종목과 같은 되돌림 기준(%)으로 스윙을 그렸을 때 출렁임 모양이 비슷한 종목.
+
+    distance 가 작을수록 비슷하다 (0 = 완전히 같음, 1 ≈ 한 항목이 '눈에 띄게' 다른 정도).
+    """
+    threshold = threshold if threshold is not None else auto_threshold(reference)
+    ref = swing_signature(reference, threshold, years)
+    if ref is None:
+        raise ValueError("기준 종목의 스윙이 너무 적습니다")
+    rv = _sig_vector(ref)
+    rows = []
+    for t, df in candidates.items():
+        if df is None or len(df) < 252:
+            continue
+        recent = df.tail(60)
+        if recent["Close"].iloc[-1] < min_price:
+            continue
+        if "Volume" in df and (recent["Close"] * recent["Volume"]).median() < min_dollar_volume:
+            continue
+        sig = swing_signature(df, threshold, years)
+        if sig is None:
+            continue
+        d = (_sig_vector(sig) - rv) / SIG_SCALES
+        rows.append({"ticker": t, "distance": float(np.sqrt(np.sum(SIG_WEIGHTS * d**2) / SIG_WEIGHTS.sum())), **sig})
+    out = pd.DataFrame(rows)
+    if out.empty:
+        return out
+    out.attrs["reference"] = ref
+    out.attrs["threshold"] = threshold
+    return out.sort_values("distance").reset_index(drop=True)
+
+
+def validate_similar(
+    ref: str,
+    candidates: dict[str, pd.DataFrame],
+    cut: pd.Timestamp,
+    train_years: int = 3,
+    top: int = 20,
+    min_dollar_volume: float = 1e6,
+    seed: int = 0,
+) -> dict:
+    """유사 종목 찾기가 '진짜'인지 검증 (표본 외 테스트).
+
+    cut 이전 train_years 년 데이터만으로 비슷한 종목을 고른 뒤,
+    cut 이후 기간에 그 종목들의 월 수익률이 기준 종목과 얼마나 같이 움직였는지(상관)를
+    무작위로 고른 종목과 비교한다. 상위 종목의 상관이 무작위보다 확실히 높아야 의미가 있다.
+    """
+    train = {k: v[v.index <= cut] for k, v in candidates.items()}
+    sim = find_similar(train[ref], {k: v for k, v in train.items() if k != ref},
+                       years=train_years, min_dollar_volume=min_dollar_volume)
+
+    def mret(df):
+        r = monthly_returns(df)
+        r.index = r.index.to_timestamp()
+        return r[r.index > cut]
+
+    rr = mret(candidates[ref])
+
+    def corr(t):
+        j = pd.concat([rr, mret(candidates[t])], axis=1, join="inner").dropna()
+        return j.iloc[:, 0].corr(j.iloc[:, 1]) if len(j) >= 12 else np.nan
+
+    n_rand = min(200, len(sim))
+    return {
+        "top": float(np.nanmean([corr(t) for t in sim["ticker"].head(top)])),
+        "random": float(np.nanmean([corr(t) for t in sim["ticker"].sample(n_rand, random_state=seed)])),
+        "bottom": float(np.nanmean([corr(t) for t in sim["ticker"].tail(top)])),
+        "months_after": len(rr),
+    }
