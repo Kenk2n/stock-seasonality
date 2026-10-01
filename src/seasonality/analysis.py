@@ -162,7 +162,7 @@ def yearly_paths(prices: pd.DataFrame | pd.Series, years: int | None = None) -> 
 
 
 def average_path(paths: pd.DataFrame, exclude_current: bool = True) -> pd.Series:
-    """완료된 해들의 평균 경로 (올해는 아직 진행 중이라 기본적으로 제외)."""
+    """완료된 해들의 중앙값 경로 (올해는 아직 진행 중이라 기본적으로 제외)."""
     cols = list(paths.columns)
     if exclude_current and cols:
         last = paths[cols[-1]]
@@ -173,4 +173,5 @@ def average_path(paths: pd.DataFrame, exclude_current: bool = True) -> pd.Series
     sub = paths[cols]
     # 연말 366일처럼 일부 해에만 있는 날은 평균이 튀므로, 절반 이상의 해에 값이 있는 날만 사용
     enough = sub.notna().sum(axis=1) >= max(1, len(cols) / 2)
-    return sub.mean(axis=1).where(enough)
+    # 평균 대신 중앙값: 한 해의 폭등·폭락이 전체 모양을 왜곡하지 않도록
+    return sub.median(axis=1).where(enough)

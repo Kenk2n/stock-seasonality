@@ -151,9 +151,9 @@ def yearly_paths_chart(paths: pd.DataFrame, title: str = "연도별 가격 흐�
     if not avg.empty:
         fig.add_trace(
             go.Scatter(
-                x=x, y=avg, mode="lines", name="평균",
+                x=x, y=avg, mode="lines", name="중앙값 (지난 해들)",
                 line=dict(color=AVG, width=2.5),
-                hovertemplate="평균 %{x|%m/%d}: %{y:.1f}<extra></extra>",
+                hovertemplate="중앙값 %{x|%m/%d}: %{y:.1f}<extra></extra>",
             )
         )
     if current is not None and not current_done:
@@ -171,4 +171,172 @@ def yearly_paths_chart(paths: pd.DataFrame, title: str = "연도별 가격 흐�
     )
     fig.update_xaxes(tickformat="%m월", dtick="M1")
     fig.add_hline(y=100, line=dict(color=MUTED, width=1, dash="dot"))
+    vals = paths.to_numpy(dtype="float64")
+    vals = vals[np.isfinite(vals)]
+    if vals.size:
+        lo, hi = np.percentile(vals, [1, 99])
+        pad = (hi - lo) * 0.05
+        fig.update_yaxes(range=[min(lo, 95) - pad, max(hi, 105) + pad])  # 극단적인 해 하나가 축을 찌그러뜨리지 않게
+    return fig
+
+
+# ------------------------------------------------------------------ 차트 흐름 (patterns.py)
+PRICE = "#52514e"   # 가격선 (중립 잉크)
+EARN = "#eda100"    # 실적 발표일
+
+
+def price_rsi_chart(
+    prices: pd.DataFrame | pd.Series,
+    window: pd.DateOffset | None = None,
+    swings: pd.DataFrame | None = None,
+    earnings_dates: pd.DatetimeIndex | None = None,
+    title: str = "가격 · RSI",
+    buttons: bool = False,
+) -> go.Figure:
+    """위: 가격 + 고점(▼)·저점(▲) + 실적일 세로선 / 아래: RSI(14) 와 70·30 기준선."""
+    from plotly.subplots import make_subplots
+
+    from .patterns import rsi as calc_rsi
+
+    close = prices["Close"] if isinstance(prices, pd.DataFrame) else prices
+    r = calc_rsi(close)
+    if window is not None:
+        start = close.index[-1] - window
+        close, r = close[close.index > start], r[r.index > start]
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.7, 0.3], vertical_spacing=0.04)
+    fig.add_trace(
+        go.Scatter(x=close.index, y=close, mode="lines", name="종가", line=dict(color=PRICE, width=1.6),
+                   hovertemplate="%{x|%Y-%m-%d}<br>$%{y:.2f}<extra></extra>"),
+        row=1, col=1,
+    )
+    if swings is not None and not swings.empty:
+        sw = swings[swings["date"] >= close.index[0]]
+        for kind, sym, color, label in [("저점", "triangle-up", UP, "저점 (이후 상승)"),
+                                        ("고점", "triangle-down", DOWN, "고점 (이후 하락)")]:
+            s = sw[sw["kind"] == kind]
+            if s.empty:
+                continue
+            fig.add_trace(
+                go.Scatter(
+                    x=s["date"], y=s["price"], mode="markers", name=label,
+                    marker=dict(symbol=sym, size=11, color=color, line=dict(color="white", width=1.5)),
+                    customdata=np.stack([s["move"] * 100, s["days"]], axis=-1),
+                    hovertemplate=(f"{kind} %{{x|%Y-%m-%d}}<br>$%{{y:.2f}}"
+                                   "<br>다음 스윙까지 %{customdata[0]:+.1f}% (%{customdata[1]}거래일)<extra></extra>"),
+                ),
+                row=1, col=1,
+            )
+    if earnings_dates is not None and len(earnings_dates):
+        ed = [d for d in pd.DatetimeIndex(earnings_dates) if close.index[0] <= d <= close.index[-1] + pd.Timedelta(days=60)]
+        for d in ed:
+            fig.add_vline(x=d, line=dict(color=EARN, width=1, dash="dot"), row=1, col=1)
+        if ed:
+            fig.add_trace(go.Scatter(x=[None], y=[None], mode="lines", name="실적 발표일",
+                                     line=dict(color=EARN, width=1, dash="dot")), row=1, col=1)
+    fig.add_trace(
+        go.Scatter(x=r.index, y=r, mode="lines", name="RSI(14)", line=dict(color=AVG, width=1.4),
+                   hovertemplate="%{x|%Y-%m-%d}<br>RSI %{y:.0f}<extra></extra>", showlegend=False),
+        row=2, col=1,
+    )
+    fig.add_hrect(y0=70, y1=100, fillcolor=UP, opacity=0.08, line_width=0, row=2, col=1)
+    fig.add_hrect(y0=0, y1=30, fillcolor=DOWN, opacity=0.08, line_width=0, row=2, col=1)
+    for y in (30, 70):
+        fig.add_hline(y=y, line=dict(color=MUTED, width=1, dash="dot"), row=2, col=1)
+    _layout(fig, title, height=560)
+    fig.update_layout(legend=dict(orientation="h", yanchor="bottom", y=1.0, xanchor="right", x=1),
+                      hovermode="closest")
+    if buttons:
+        from .patterns import WINDOWS
+
+        end = close.index[-1]
+        btns = []
+        for label, off in WINDOWS.items():
+            s = close[close.index > end - off]
+            if len(s) < 2 or close.index[0] > end - off + pd.Timedelta(days=10):
+                continue  # 데이터가 그 기간보다 짧음
+            pad = (s.max() - s.min()) * 0.06 or s.max() * 0.05
+            btns.append(dict(label=label, method="relayout",
+                             args=[{"xaxis.range": [s.index[0], end + pd.Timedelta(days=2)],
+                                    "xaxis2.range": [s.index[0], end + pd.Timedelta(days=2)],
+                                    "yaxis.range": [s.min() - pad, s.max() + pad]}]))
+        fig.update_layout(
+            updatemenus=[dict(type="buttons", direction="right", x=0, xanchor="left", y=1.01, yanchor="bottom",
+                              buttons=btns, active=len(btns) - 1, showactive=True, pad=dict(r=4, t=0),
+                              bgcolor="rgba(137,135,129,0.10)", font=dict(size=12))],
+            margin=dict(t=110),
+        )
+        fig.update_layout(legend=dict(y=1.01))
+    fig.update_yaxes(tickprefix="$", row=1, col=1)
+    fig.update_yaxes(range=[0, 100], tickvals=[30, 50, 70], title_text="RSI", row=2, col=1)
+    return fig
+
+
+def swing_calendar_chart(cal: pd.DataFrame, title: str = "월별 저점·고점 횟수") -> go.Figure:
+    fig = go.Figure()
+    fig.add_trace(go.Bar(x=MONTH_NAMES, y=cal["lows"], name="저점 (이후 상승)", marker_color=UP,
+                         hovertemplate="%{x} 저점 %{y}회<extra></extra>"))
+    fig.add_trace(go.Bar(x=MONTH_NAMES, y=cal["highs"], name="고점 (이후 하락)", marker_color=DOWN,
+                         hovertemplate="%{x} 고점 %{y}회<extra></extra>"))
+    _layout(fig, title, height=320)
+    fig.update_layout(barmode="group", bargap=0.3, bargroupgap=0.08, barcornerradius=4,
+                      legend=dict(orientation="h", yanchor="bottom", y=1.0, xanchor="right", x=1))
+    fig.update_yaxes(dtick=1)
+    return fig
+
+
+def forward_heatmap(fwd: pd.DataFrame, title: str = "매달 초에 샀다면 (평균 수익률 · 상승 확률)") -> go.Figure:
+    labels = list(dict.fromkeys(fwd.index.get_level_values(0)))
+    z = np.array([fwd.loc[(l, "mean")].to_numpy(dtype="float64") * 100 for l in labels])
+    win = np.array([fwd.loc[(l, "win_rate")].to_numpy(dtype="float64") * 100 for l in labels])
+    n = np.array([fwd.loc[(l, "n")].to_numpy(dtype="float64") for l in labels])
+    finite = np.abs(z[np.isfinite(z)])
+    lim = float(np.nanpercentile(finite, 95)) if finite.size else 1.0
+    text = np.vectorize(lambda v, w: "" if not np.isfinite(v) else f"{v:+.1f}%<br>{w:.0f}%")(z, win)
+    fig = go.Figure(
+        go.Heatmap(
+            z=z, x=MONTH_NAMES, y=labels, colorscale=DIVERGING, zmid=0, zmin=-lim, zmax=lim,
+            xgap=2, ygap=2, text=text, texttemplate="%{text}", textfont=dict(size=11),
+            customdata=np.stack([win, n], axis=-1),
+            hovertemplate="%{x} 초 매수 → %{y}<br>평균 %{z:+.2f}%<br>상승 확률 %{customdata[0]:.0f}% (%{customdata[1]:.0f}회)<extra></extra>",
+            colorbar=dict(title="평균 %", ticksuffix="%", thickness=12),
+        )
+    )
+    _layout(fig, title, height=240)
+    fig.update_yaxes(autorange="reversed", gridcolor="rgba(0,0,0,0)")
+    return fig
+
+
+def rsi_month_chart(rsi_m: pd.DataFrame, title: str = "월별 평균 RSI") -> go.Figure:
+    v = rsi_m["rsi_mean"]
+    colors = [UP if x >= 50 else DOWN for x in v.fillna(50)]
+    fig = go.Figure(
+        go.Bar(
+            x=MONTH_NAMES, y=v - 50, base=50, marker_color=colors,
+            customdata=np.stack([rsi_m["overbought"] * 100, rsi_m["oversold"] * 100, v], axis=-1),
+            hovertemplate="%{x} 평균 RSI %{customdata[2]:.1f}<br>과매수(>70) %{customdata[0]:.0f}% · "
+                          "과매도(<30) %{customdata[1]:.0f}%의 날<extra></extra>",
+        )
+    )
+    _layout(fig, title, height=300)
+    fig.update_layout(bargap=0.35, barcornerradius=4)
+    fig.add_hline(y=50, line=dict(color=MUTED, width=1))
+    lo, hi = float(np.nanmin(v)), float(np.nanmax(v))
+    fig.update_yaxes(range=[min(35, lo - 3), max(65, hi + 3)])
+    return fig
+
+
+def earnings_reaction_chart(reac: pd.DataFrame, title: str = "실적 발표 반응 (전날 → 다음날)") -> go.Figure:
+    v = reac["reaction"] * 100
+    fig = go.Figure(
+        go.Bar(
+            x=reac["date"].dt.strftime("%Y-%m"), y=v, marker_color=[UP if x >= 0 else DOWN for x in v],
+            customdata=np.stack([reac["before"] * 100, reac["after"] * 100], axis=-1),
+            hovertemplate="%{x} 실적<br>반응 %{y:+.1f}%<br>발표 전 20일 %{customdata[0]:+.1f}%"
+                          "<br>발표 후 20일 %{customdata[1]:+.1f}%<extra></extra>",
+        )
+    )
+    _layout(fig, title, height=300)
+    fig.update_layout(bargap=0.3, barcornerradius=4)
+    fig.update_yaxes(ticksuffix="%", zeroline=True, zerolinecolor=MUTED)
+    fig.update_xaxes(type="category")
     return fig

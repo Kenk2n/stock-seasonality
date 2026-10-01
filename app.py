@@ -10,7 +10,7 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
-from seasonality import analysis, charts, data, scanner, synthetic, universe  # noqa: E402
+from seasonality import analysis, charts, data, earnings, patterns, report, scanner, synthetic, universe  # noqa: E402
 
 st.set_page_config(page_title="주식 계절성 탐색기", page_icon="📈", layout="wide")
 
@@ -56,8 +56,94 @@ def pattern_kwargs() -> dict:
                 alpha=alpha, min_hit_rate=min_hit)
 
 
+@st.cache_data(show_spinner=False)
+def get_earnings(ticker: str, demo: bool) -> pd.DatetimeIndex:
+    if demo:
+        return pd.DatetimeIndex([])
+    return earnings.load_earnings_dates(ticker)
+
+
+@st.cache_data(show_spinner=False)
+def get_small_cap_bench(demo: bool) -> pd.DataFrame:
+    if demo:
+        return synthetic.make_prices(seed=998)
+    return data.load_prices("IWM")
+
+
 st.title("📈 주식 계절성 탐색기")
-tab_one, tab_scan = st.tabs(["종목 분석", "스캐너"])
+tab_pattern, tab_similar, tab_one, tab_scan = st.tabs(["차트 패턴", "유사 종목 찾기", "월별 계절성", "스캐너"])
+
+# ---------------------------------------------------------------- 차트 패턴
+with tab_pattern:
+    c1, c2 = st.columns([2, 1])
+    pt_ticker = c1.text_input("종목 코드", value="DEMO_NOV" if demo else "KRUS", key="pt_ticker").strip().upper()
+    pt_years = c2.selectbox("계절성 분석 기간", [3, 5, 10], index=1, format_func=lambda y: f"최근 {y}년")
+    if pt_ticker:
+        try:
+            with st.spinner(f"{pt_ticker} 불러오는 중..."):
+                pt_prices = get_prices(pt_ticker, demo)
+                pt_earn = get_earnings(pt_ticker, demo)
+                pt_bench = get_small_cap_bench(demo)
+        except Exception as e:
+            st.error(f"데이터를 불러오지 못했습니다: {e}")
+            st.stop()
+
+        rep = report.build_report(pt_ticker, pt_prices, pt_earn, pt_ticker, pt_years, pt_bench)
+        st.markdown("\n".join(f"- {f}" for f in rep.findings).replace("$", "\\$"))  # $ 를 수식으로 읽지 않게
+
+        win_label = st.radio("차트 기간", list(patterns.WINDOWS), index=4, horizontal=True)
+        swings = patterns.find_swings(pt_prices)
+        st.plotly_chart(
+            charts.price_rsi_chart(pt_prices, patterns.WINDOWS[win_label], swings, pt_earn,
+                                   f"{pt_ticker} 가격과 RSI ({win_label})"),
+            width="stretch",
+        )
+        st.subheader("기간별 요약")
+        st.dataframe(
+            rep.summary.style.format({"수익률": "{:+.1%}", "최대낙폭": "{:+.1%}", "현재가 위치": "{:.0%}",
+                                      "RSI 평균": "{:.0f}", "RSI 최고": "{:.0f}", "RSI 최저": "{:.0f}"}),
+            width="stretch",
+        )
+        for title, fig in rep.figures[1:]:
+            st.plotly_chart(fig, width="stretch")
+
+# ---------------------------------------------------------------- 유사 종목
+with tab_similar:
+    st.write("기준 종목과 **언제 오르고 언제 내리는지**(월별·주별 계절성 지문)가 비슷한 종목을 찾습니다.")
+    c1, c2, c3 = st.columns([2, 1, 1])
+    sim_ref = c1.text_input("기준 종목", value="DEMO_NOV" if demo else "HHH", key="sim_ref").strip().upper()
+    sim_years = c2.selectbox("기간", [3, 5, 10], index=1, format_func=lambda y: f"최근 {y}년", key="sim_years")
+    sim_uni = c3.selectbox("검색 범위", ["받아둔 종목 전체", "나스닥 100", "미국 전체 (오래 걸림)"] if not demo else ["데모 종목"])
+    min_dv = st.slider("최소 일평균 거래대금 ($M)", 0, 50, 2)
+    if st.button("유사 종목 찾기", type="primary"):
+        if demo:
+            cands = synthetic.demo_universe()
+        elif sim_uni == "나스닥 100":
+            cands = data.update_many(universe.NASDAQ100)
+        elif sim_uni.startswith("미국 전체"):
+            bar = st.progress(0.0, text="데이터 준비 중...")
+            cands = data.update_many(universe.us_all(), batch_size=100, pause=0.5,
+                                     on_progress=lambda d, t: bar.progress(d / max(t, 1), text=f"다운로드 {d}/{t}"))
+            bar.empty()
+        else:
+            tickers = [f.stem for f in data.DEFAULT_CACHE_DIR.glob("*.parquet")]
+            cands = data.update_many(tickers)
+        ref_prices = get_prices(sim_ref, demo)
+        with st.spinner(f"{len(cands)}개 종목 비교 중..."):
+            sim = patterns.find_similar(ref_prices, {k: v for k, v in cands.items() if k != sim_ref},
+                                        years=sim_years, min_dollar_volume=min_dv * 1e6)
+        st.session_state["sim_result"] = (sim_ref, sim)
+
+    if "sim_result" in st.session_state:
+        ref, sim = st.session_state["sim_result"]
+        st.subheader(f"{ref} 와 비슷한 종목 {min(len(sim), 50)}개")
+        st.dataframe(
+            sim.head(50).rename(columns={"ticker": "종목", "similarity": "유사도", "corr_monthly": "월별 상관",
+                                         "corr_weekly": "주별 상관", "amplitude": "계절 진폭"})
+            .style.format({"유사도": "{:.2f}", "월별 상관": "{:.2f}", "주별 상관": "{:.2f}", "계절 진폭": "{:.1%}"}),
+            width="stretch", hide_index=True,
+        )
+        st.caption("종목 코드를 '차트 패턴' 탭에 넣으면 자세한 차트를 볼 수 있습니다.")
 
 # ---------------------------------------------------------------- 종목 분석
 with tab_one:
