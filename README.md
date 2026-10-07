@@ -88,6 +88,8 @@ python accumulation_scan.py --exchanges us --backtest   # 나스닥 + NYSE
 python midterm_report.py          # S&P 500·나스닥·러셀2000·다우, 1950년 이후 중간선거
 python midterm_report.py --refresh
 python election_month.py          # 앞으로의 선거일(2026·2028·2030·2032)별 선거 전후 1개월 예상 범위
+python election_daily.py --refresh                 # 선거 전후 ±21거래일 일별 변동: 2000~2024 vs 2026 (지금까지)
+python election_daily.py --index ^IXIC --refresh   # 나스닥
 ```
 
 선거일(11월 첫 월요일 다음 화요일) 기준 6개월 전~1년 후 구간 수익률, 중간선거 해 최대낙폭과 저점,
@@ -178,6 +180,7 @@ accumulation_scan.py       매집 흔적 스캐너 + 백테스트
 range_scan.py              박스권 왕복 종목 찾기
 midterm_report.py          미국 중간선거 전후 주가 리포트
 election_month.py          선거일 전후 1개월 예상 범위 (중간선거·대선별, 시장 상태 조건부)
+election_daily.py          선거 전후 ±21거래일 일별 변동, 올해 vs 과거 범위
 src/seasonality/
   data.py                  다운로드 + parquet 캐시 + 증분 업데이트
   universe.py              나스닥 100 목록, 나스닥 전체 목록 받기
