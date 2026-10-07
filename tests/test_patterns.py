@@ -124,3 +124,12 @@ def test_rangebound_prefers_oscillator_over_trend():
     assert mt["trend_ratio"] > 0.8
     assert rb.range_score(mo) > rb.range_score(mt)
     assert rb.box_status(-0.1) == "박스 아래" and rb.box_status(1.5) == "상단 돌파"
+
+
+def test_election_day_rule():
+    from seasonality import elections as el
+
+    assert str(el.election_day(2026).date()) == "2026-11-03"
+    assert str(el.election_day(2022).date()) == "2022-11-08"
+    assert str(el.election_day(2018).date()) == "2018-11-06"
+    assert el.midterm_years(2010, 2026) == [2010, 2014, 2018, 2022, 2026]

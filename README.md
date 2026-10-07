@@ -82,6 +82,16 @@ python accumulation_scan.py --exchanges us --backtest   # 나스닥 + NYSE
 > 2022.11~2026.6 검증 결과 이 흔적들은 이후 3개월 수익률을 예측하지 못했습니다 (상위 30개가 시장보다 −0.5~−1.1%).
 > 2025.1~2026.6 내부자 장내 매수 1,986건도 이후 성과가 정확히 평균이었습니다. 후보 목록은 참고용입니다.
 
+## 미국 중간선거 전후 주가
+
+```bash
+python midterm_report.py          # S&P 500·나스닥·러셀2000·다우, 1950년 이후 중간선거
+python midterm_report.py --refresh
+```
+
+선거일(11월 첫 월요일 다음 화요일) 기준 6개월 전~1년 후 구간 수익률, 중간선거 해 최대낙폭과 저점,
+선거 전후 변동성·VIX, 오늘 시점에서 샀을 때의 과거 결과, 같은 날짜의 다른 해와 비교를 리포트로 만듭니다.
+
 ## 설치
 
 ```bash
@@ -165,6 +175,7 @@ analyze.py                 차트 패턴 리포트 + 유사 종목 찾기
 earnings_scan.py           실적 주기 패턴이 비슷한 종목 찾기
 accumulation_scan.py       매집 흔적 스캐너 + 백테스트
 range_scan.py              박스권 왕복 종목 찾기
+midterm_report.py          미국 중간선거 전후 주가 리포트
 src/seasonality/
   data.py                  다운로드 + parquet 캐시 + 증분 업데이트
   universe.py              나스닥 100 목록, 나스닥 전체 목록 받기
