@@ -105,6 +105,41 @@ python election_daily.py --index ^IXIC --refresh   # 나스닥
 선거일(11월 첫 월요일 다음 화요일) 기준 6개월 전~1년 후 구간 수익률, 중간선거 해 최대낙폭과 저점,
 선거 전후 변동성·VIX, 오늘 시점에서 샀을 때의 과거 결과, 같은 날짜의 다른 해와 비교를 리포트로 만듭니다.
 
+## 👟 KREAM 리셀 차익 분석기
+
+KREAM 에서 **거래량·프리미엄(발매가 대비 웃돈)·관심수**가 높은 상품을 골라, 해외 몰(StockX·GOAT·나이키 US·SNKRDUNK 등)에서
+사서 들여와 KREAM 에 팔았을 때 **개당 순이익·마진·손익분기 판매가**를 계산합니다.
+
+```bash
+streamlit run kream_app.py                                   # 웹 앱 (예시 데이터로 바로 열림)
+python kream_scan.py                                         # 터미널, 예시 데이터
+python kream_scan.py --kream my_kream.csv --offers my_offers.csv
+python kream_scan.py --business --bundle 5                   # 일반과세 사업자, 5개씩 묶어 통관
+python kream_scan.py --list-url "https://kream.co.kr/search?sort=popular" --limit 30   # 실험: KREAM 에서 직접
+```
+
+1. **KREAM 후보**: 거래량 40 · 프리미엄 35 · 관심수 25 비중으로 각 순위(백분위)를 섞은 0~100점. 최소 거래량·프리미엄으로 거릅니다.
+   사이즈별로 시세가 다르면 사이즈마다 한 줄씩 넣습니다.
+2. **해외 가격**: 후보 모델번호로 각 몰 검색 링크를 만들어 주고, 찾은 가격을 표에 적습니다(또는 CSV). 사이즈를 비우면 모든 사이즈에 적용.
+3. **손익**: 해외가 → 현지·국제 배송 → 해외결제 수수료 → 관세·(개별소비세)·부가세 → 통관 수수료 → KREAM 수수료·택배비.
+   KREAM 판매가는 즉시판매가(보수적) / 최근 거래가 / 즉시구매가−1,000원 중 선택. 환율은 open.er-api.com 에서 받고 실패하면 기본값(직접 수정).
+
+입력 CSV (머리글은 영문·한글 모두 가능, 예시는 `examples/`):
+
+```
+product_id,name,brand,model_no,category,size,release_price,last_price,lowest_ask,highest_bid,trades,wishes
+상품번호,상품명,브랜드,모델번호,카테고리,사이즈,발매가,최근거래가,즉시구매가,즉시판매가,거래량,관심수
+
+model_no,size,store,currency,price,local_shipping,intl_shipping_usd,url
+```
+
+> ⚠️ **자가사용 면세(목록통관, 미국 $200 / 그 외 $150)로 들여와 되파는 것은 관세법 위반**입니다. 그래서 이 분석기는
+> 항상 관세·부가세를 낸 정식 수입신고를 가정합니다(신발·의류 13%, 그 외 8% 기본, 가방·시계 200만원 초과분 개별소비세).
+> 이렇게 계산하면 해외가의 약 1.4배 + 고정비가 원가라서, 대부분은 KREAM 시세가 해외보다 크게 높을 때만 남습니다.
+> KREAM 수수료(기본 6.6%)는 판매자 등급마다 다르고, 배송 2~4주 동안 시세가 바뀌므로 **하락 여유**를 함께 보세요.
+> KREAM 직접 가져오기는 공개 API 가 없어 상품 페이지를 읽는 실험 기능입니다 — 사이트가 바뀌면 일부 값이 비며,
+> 이용약관을 확인하고 적은 양만 쓰세요. 예시 데이터의 가격은 가상입니다.
+
 ## 설치
 
 ```bash
