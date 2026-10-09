@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>주식 후보 모니터</title>
+<meta name="description" content="박스 하단권 · 매집 흔적 후보를 매일 매수 타이밍 순으로 정리하고 위험 신호와 지표 차트를 보여줍니다.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232a78d6'/%3E%3Cpath d='M6 22l6-7 5 4 9-11' stroke='white' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+<script src="vendor/lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+<header class="top">
+  <div class="top-in">
+    <div>
+      <h1>주식 후보 모니터</h1>
+      <p class="sub" id="meta">불러오는 중…</p>
+    </div>
+    <button class="icon-btn" id="theme-btn" title="화면 테마 바꾸기" aria-label="화면 테마 바꾸기">◐</button>
+  </div>
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-tab="box" class="on">박스 하단권</button>
+    <button role="tab" data-tab="accum">매집 흔적</button>
+    <button role="tab" data-tab="track">성과 추적</button>
+    <button role="tab" data-tab="sector">업황</button>
+    <button role="tab" data-tab="help">설명</button>
+  </nav>
+</header>
+<main id="main"></main>
+
+<div class="drawer" id="drawer" hidden>
+  <div class="drawer-bg" data-close></div>
+  <section class="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="d-title">
+    <div class="drawer-bar">
+      <button class="btn" data-nav="-1" title="이전 (←)">‹ 이전</button>
+      <span class="note" id="d-pos"></span>
+      <button class="btn" data-nav="1" title="다음 (→)">다음 ›</button>
+      <span class="grow"></span>
+      <button class="btn" data-close title="닫기 (Esc)">닫기 ✕</button>
+    </div>
+    <div id="d-body"></div>
+  </section>
+</div>
+<script src="app.js"></script>
+</body>
+</html>
