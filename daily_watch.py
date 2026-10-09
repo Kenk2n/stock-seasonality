@@ -316,7 +316,7 @@ def main() -> int:
         "changes": {k: {"new": sorted(new[k]), "dropped": new[k + "_dropped"]} for k in watch.LIST_NAMES},
         "sectors": sector_tab.reset_index().sort_values("vs_spy3m").to_dict("records") if len(sector_tab) else [],
         "tracking": tracking,
-        "risk_categories": risk.CATEGORIES,
+        "risk_categories": risk.CATEGORIES, "sec_enabled": bool(cik_map),
         "weights": {"box": timing.BOX_WEIGHTS, "accum": timing.ACC_WEIGHTS, "labels": timing.LABELS},
     }
     write_json(site / "data" / "latest.json", latest)

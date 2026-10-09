@@ -46,7 +46,8 @@ jobs:
 
       - name: 스캔 + 사이트 만들기
         env:
-          SEC_USER_AGENT: "stock-seasonality daily-watch ${{ github.repository_owner }}@users.noreply.github.com"
+          # SEC 공시 경고를 쓰려면 Settings → Secrets and variables → Actions → Variables 에 SEC_CONTACT_EMAIL 추가
+          SEC_USER_AGENT: ${{ vars.SEC_CONTACT_EMAIL && format('stock-seasonality daily-watch {0}', vars.SEC_CONTACT_EMAIL) || '' }}
         run: python daily_watch.py --site site
 
       # 차트 데이터가 매일 바뀌므로 이력을 쌓지 않고 커밋 1개로 덮어쓴다 (기록은 history.csv 안에 누적)

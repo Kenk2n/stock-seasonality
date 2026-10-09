@@ -113,6 +113,8 @@ KRUS 닮음 20 · 매집 흔적 15 · 거래량 증가 10 − 위험 감점)로 
 1. `.github/workflows/daily-watch.yml` 이 저장소의 **기본 브랜치**에 있어야 예약 실행이 됩니다.
 2. GitHub 저장소 → **Actions** → daily-watch → **Run workflow** 로 한 번 실행 (gh-pages 브랜치가 생깁니다).
 3. **Settings → Pages** → Source: *Deploy from a branch*, Branch: `gh-pages` / `(root)` → Save.
+4. (선택) SEC 공시 경고(증자 신고서·상장 유지 통지 등): **Settings → Secrets and variables → Actions → Variables** 에
+   `SEC_CONTACT_EMAIL` = 본인 이메일 추가. SEC 는 연락처 이메일이 있는 요청만 받습니다 (GitHub noreply 주소는 거절).
 
 ```bash
 python daily_watch.py                # 내 컴퓨터에서 실행 → site/ (python -m http.server -d site 로 열기)

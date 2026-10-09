@@ -32,8 +32,9 @@ CATEGORIES = {
 }
 LEVEL_ORDER = {"none": 0, "low": 1, "mid": 2, "high": 3}
 UA = "Mozilla/5.0 (stock-seasonality daily-watch; +https://github.com/Kenk2n/stock-seasonality)"
-# SEC 은 연락처(이메일 형식)가 들어간 User-Agent 만 받는다. 워크플로에서 SEC_USER_AGENT 로 넘긴다.
-SEC_UA = os.environ.get("SEC_USER_AGENT") or "stock-seasonality daily-watch noreply@users.noreply.github.com"
+# SEC 은 실제 연락처 이메일이 들어간 User-Agent 만 받는다 (GitHub noreply 주소는 거절됨).
+# 워크플로가 저장소 변수 SEC_CONTACT_EMAIL 로 SEC_USER_AGENT 를 만든다. 없으면 SEC 공시 확인을 건너뛴다.
+SEC_UA = os.environ.get("SEC_USER_AGENT", "").strip()
 
 # ---------------------------------------------------------------- 뉴스 키워드
 # (정규식, 분류, 위험도, 설명). 제목을 소문자로 바꿔 검사한다.
@@ -165,6 +166,9 @@ SEC_8K_ITEMS = {
 
 
 def load_sec_cik_map(cache_dir: Path = Path("data/sec")) -> dict[str, int]:
+    if not SEC_UA:
+        log.warning("SEC 공시 확인 건너뜀: SEC_USER_AGENT(저장소 변수 SEC_CONTACT_EMAIL) 없음")
+        return {}
     data = _cached_json(Path(cache_dir) / "company_tickers.json", 24 * 7,
                         lambda: json.loads(_get("https://www.sec.gov/files/company_tickers.json", SEC_UA)))
     if not data:

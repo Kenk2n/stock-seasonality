@@ -385,7 +385,7 @@ function renderDetail() {
       </div>
       <div>
         <h3 style="margin-top:4px">매수 주의</h3>
-        <div class="card"><ul class="list">${flags}</ul></div>
+        <div class="card"><ul class="list">${flags}</ul>${D.sec_enabled ? "" : `<p class="note" style="margin:8px 0 0">SEC 공시(증자 신고서 등) 확인은 꺼져 있습니다. 켜는 방법은 '설명' 탭에 있습니다.</p>`}</div>
         <h3>타이밍 점수 ${num(r.timing)} / 100</h3>
         <div class="card parts">${parts}${plan}</div>
         <h3>${list === "box" ? "박스" : "매집 흔적"}</h3>
@@ -616,6 +616,8 @@ function renderHelp() {
       <li><b>업황</b>: 그 업종 ETF가 200일선 아래이거나 3개월 동안 S&amp;P 500보다 5%p 넘게 약함.</li>
       <li><b>주가 흐름·급등락</b>: 3개월 −30% 급락, 박스 이탈, 최근 급등(작전·덤핑 위험), 큰 변동성. <b>실적 임박</b>: 7일 이내.</li></ul>
     <p>뉴스는 제목의 단어로 판단하므로 놓치거나 잘못 잡는 경우가 있습니다. '원문' 링크로 꼭 직접 확인하세요.</p>
+    <p>SEC 공시 확인: 지금 <b>${S.data.sec_enabled ? "켜짐" : "꺼짐"}</b>. SEC 는 연락처 이메일을 밝힌 요청만 받으므로, 켜려면 GitHub 저장소
+      Settings → Secrets and variables → Actions → <b>Variables</b> 에 <code>SEC_CONTACT_EMAIL</code> (본인 이메일)을 추가하세요. 다음 실행부터 적용됩니다.</p>
     <h3>지표</h3>
     <ul><li><b>RSI</b> 30 아래 과매도, 70 위 과매수. <b>스토캐스틱 RSI</b>는 RSI를 더 민감하게 만든 것 (20 아래에서 상향 교차 = 반등 신호).</li>
       <li><b>MACD</b> 시그널선 상향 돌파 = 골든크로스. 히스토그램이 음수에서 올라오면 하락 힘이 약해지는 중.</li>
