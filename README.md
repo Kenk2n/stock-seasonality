@@ -79,6 +79,30 @@ python box_picks.py --min-mcap 2e8 --min-dollar-volume 3e6     # 조금 넓게
 3·4·5년 박스 왕복형 중 지금 박스 하단(위치 −20%~30%)에 있는 종목을 점수(박스 품질 35 · 하단 근접 20 ·
 KRUS 닮음 20 · 매집 흔적 15 · 거래량 증가 10 − 위험 감점)로 줄 세우고, 기관·공매도·내부자·다음 실적일과 함께 보여줍니다.
 
+## 매일 후보 모니터링 페이지 (GitHub Pages)
+
+박스 하단 후보와 매집 흔적 상위 종목을 **평일 아침마다 자동으로 갱신해서 웹페이지**로 보여줍니다.
+서버 없이 GitHub Actions + GitHub Pages 로 돌아가서 비용은 0원입니다.
+
+- 주소: `https://<GitHub 아이디>.github.io/stock-seasonality/`
+- 갱신: 평일 미국 장 마감 후 (한국 시간 화~토 오전 7시 17분 시작, 30분~1시간 걸림)
+- 페이지 내용
+  - 오늘의 박스 하단 후보, 박스 하단 + 매집 흔적 강함, 매집 흔적 상위 (NEW = 새로 들어옴, N일째 = 연속 유지)
+  - 어제와 달라진 점 (신규·제외)
+  - **이전 후보 추적**: 처음 목록에 오른 날 종가에 샀다면 지금까지 수익률, S&P 500 대비, 박스 상단 도달·박스 이탈 여부.
+    기록이 쌓이면 이 방법이 실제로 통하는지 직접 확인할 수 있습니다.
+  - 차트가 있는 전체 리포트 링크
+
+처음 한 번만 설정:
+1. `.github/workflows/daily-watch.yml` 이 저장소의 **기본 브랜치**에 있어야 예약 실행이 됩니다.
+2. GitHub 저장소 → **Actions** → daily-watch → **Run workflow** 로 한 번 실행 (gh-pages 브랜치가 생깁니다).
+3. **Settings → Pages** → Source: *Deploy from a branch*, Branch: `gh-pages` / `(root)` → Save.
+
+```bash
+python daily_watch.py               # 내 컴퓨터에서 실행 → site/index.html
+python daily_watch.py --skip-scan   # 스캔 없이 site/*.csv 로 페이지만 다시 만들기
+```
+
 ## 매집 흔적 스캐너 (+ 백테스트)
 
 주가·거래량에 남는 매집 흔적(주가 대비 거래량 쏠림, CMF, 흡수형 대량거래, 변동성 수축)과
@@ -189,6 +213,7 @@ earnings_scan.py           실적 주기 패턴이 비슷한 종목 찾기
 accumulation_scan.py       매집 흔적 스캐너 + 백테스트
 range_scan.py              박스권 왕복 종목 찾기
 box_picks.py               박스 하단 후보 (박스 + 거래량 + 매집 + KRUS 유사도, 위험 감점)
+daily_watch.py             매일 후보 모니터링 페이지 (GitHub Actions → GitHub Pages)
 midterm_report.py          미국 중간선거 전후 주가 리포트
 election_month.py          선거일 전후 1개월 예상 범위 (중간선거·대선별, 시장 상태 조건부)
 election_daily.py          선거 전후 ±21거래일 일별 변동, 올해 vs 과거 범위
@@ -201,6 +226,7 @@ src/seasonality/
   earnings.py              실적 발표일, 실적 전후 반응
   report.py                자동 요약 문장 + HTML 리포트
   charts.py                Plotly 차트 (상승 = 빨강, 하락 = 파랑)
+  watch.py                 후보 기록 누적, 신규·제외 비교, 이전 후보 성과 추적
   synthetic.py             테스트·데모용 가짜 주가
 tests/                     pytest (네트워크 없이 실행)
 ```
