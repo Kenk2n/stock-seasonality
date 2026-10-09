@@ -6,12 +6,15 @@ flag 한 개 = {"cat": 분류, "level": high|mid|low, "label": 짧은 이름, "d
 
 from __future__ import annotations
 
+import gzip
 import json
 import logging
 import os
 import re
 import time
+import urllib.error
 import urllib.request
+import zlib
 import xml.etree.ElementTree as ET
 from datetime import timezone
 from email.utils import parsedate_to_datetime
@@ -29,8 +32,9 @@ CATEGORIES = {
 }
 LEVEL_ORDER = {"none": 0, "low": 1, "mid": 2, "high": 3}
 UA = "Mozilla/5.0 (stock-seasonality daily-watch; +https://github.com/Kenk2n/stock-seasonality)"
-# SEC 은 연락처(이메일 형식)가 들어간 User-Agent 만 받는다. 워크플로에서 SEC_USER_AGENT 로 넘긴다.
-SEC_UA = os.environ.get("SEC_USER_AGENT") or "stock-seasonality daily-watch noreply@users.noreply.github.com"
+# SEC 은 실제 연락처 이메일이 들어간 User-Agent 만 받는다 (GitHub noreply 주소는 거절됨).
+# 워크플로가 저장소 변수 SEC_CONTACT_EMAIL 로 SEC_USER_AGENT 를 만든다. 없으면 SEC 공시 확인을 건너뛴다.
+SEC_UA = os.environ.get("SEC_USER_AGENT", "").strip()
 
 # ---------------------------------------------------------------- 뉴스 키워드
 # (정규식, 분류, 위험도, 설명). 제목을 소문자로 바꿔 검사한다.
@@ -67,9 +71,19 @@ def classify_headline(title: str) -> list[tuple[str, str, str]]:
 
 
 def _get(url: str, ua: str = UA, timeout: float = 20) -> bytes:
-    req = urllib.request.Request(url, headers={"User-Agent": ua, "Accept-Encoding": "identity"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return r.read()
+    req = urllib.request.Request(url, headers={"User-Agent": ua, "Accept-Encoding": "gzip, deflate", "Accept": "*/*"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            body = r.read()
+            enc = (r.headers.get("Content-Encoding") or "").lower()
+    except urllib.error.HTTPError as e:  # 거절 사유가 본문에 있으면 로그로 남긴다
+        detail = e.read()[:300].decode("utf-8", "replace") if e.fp else ""
+        raise RuntimeError(f"HTTP {e.code} {url} {' '.join(detail.split())[:200]}") from None
+    if enc == "gzip":
+        body = gzip.decompress(body)
+    elif enc == "deflate":
+        body = zlib.decompress(body)
+    return body
 
 
 def _cached_json(path: Path, max_age_h: float, fetch):
@@ -152,6 +166,9 @@ SEC_8K_ITEMS = {
 
 
 def load_sec_cik_map(cache_dir: Path = Path("data/sec")) -> dict[str, int]:
+    if not SEC_UA:
+        log.warning("SEC 공시 확인 건너뜀: SEC_USER_AGENT(저장소 변수 SEC_CONTACT_EMAIL) 없음")
+        return {}
     data = _cached_json(Path(cache_dir) / "company_tickers.json", 24 * 7,
                         lambda: json.loads(_get("https://www.sec.gov/files/company_tickers.json", SEC_UA)))
     if not data:
