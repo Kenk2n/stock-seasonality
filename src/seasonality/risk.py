@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import time
 import urllib.request
@@ -28,7 +29,8 @@ CATEGORIES = {
 }
 LEVEL_ORDER = {"none": 0, "low": 1, "mid": 2, "high": 3}
 UA = "Mozilla/5.0 (stock-seasonality daily-watch; +https://github.com/Kenk2n/stock-seasonality)"
-SEC_UA = "stock-seasonality daily-watch research bot (github.com/Kenk2n/stock-seasonality)"
+# SEC 은 연락처(이메일 형식)가 들어간 User-Agent 만 받는다. 워크플로에서 SEC_USER_AGENT 로 넘긴다.
+SEC_UA = os.environ.get("SEC_USER_AGENT") or "stock-seasonality daily-watch noreply@users.noreply.github.com"
 
 # ---------------------------------------------------------------- 뉴스 키워드
 # (정규식, 분류, 위험도, 설명). 제목을 소문자로 바꿔 검사한다.
