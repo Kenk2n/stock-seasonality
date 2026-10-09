@@ -779,7 +779,7 @@ async function simBlock(t, el, full) {
     <p style="margin:10px 0 4px"><b>${L}거래일</b> 차트와 비슷한 과거 차트 <b>${w.n}개</b> 중 <b class="up">${up}개 (${num(w.rise * 100)}%)</b>가 10거래일 뒤 올랐고, 평균 ${pctC(w.avg)} · 중간값 ${pctC(w.med)} 움직였습니다. 점수 <b>${num(w.score, 1)}</b>.</p>
     ${fanSvg(w, +L)}
     <p class="note" style="margin:4px 0 8px">굵은 검은 선 = 지금 ${esc(t)} 차트 · 회색 = 비슷한 과거 차트 ${w.top.length}개 · 그 뒤 10일: <span class="up">빨강 = 오름</span>, <span class="down">파랑 = 내림</span> ·
-      띠 = 비슷한 차트 ${w.n}개의 10일 뒤 범위 (진한 띠 가운데 50%, 연한 띠 80%), 띠 가운데 선 = 중간값. 모든 선은 지금(오늘) 가격 = 0% 로 맞춤.</p>
+      보라 띠 = 비슷한 차트 ${w.n}개의 10일 뒤 범위 (진한 띠 가운데 50%, 연한 띠 80%), 보라 선 = 중간값. 모든 선은 지금(오늘) 가격 = 0% 로 맞춤.</p>
     ${full ? `<div class="tbl"><table><thead><tr><th class="l">비슷한 과거 차트</th><th class="l">기간</th><th>유사도</th><th>10일 뒤</th></tr></thead><tbody>
       ${w.top.map((a) => `<tr><td class="l"><b>${esc(a.t)}</b></td><td class="l">${esc(a.start)} ~ ${esc(a.end)}</td><td class="n">${num(a.s * 100)}%</td><td class="n">${pctC(a.r)}</td></tr>`).join("")}
       </tbody></table></div>` : `<p class="note"><a href="#similar/${encodeURIComponent(t)}" data-simopen>비슷한 과거 차트 목록 보기 →</a></p>`}`;
@@ -790,7 +790,8 @@ async function simBlock(t, el, full) {
 
 function fanSvg(w, L) {
   const H0 = w.fan.p50.length;
-  const W = 640, H = 300, P = { l: 46, r: 14, t: 12, b: 28 };
+  const narrow = matchMedia("(max-width: 600px)").matches;  // 휴대폰: 좁은 캔버스로 글씨를 키움
+  const W = narrow ? 380 : 640, H = narrow ? 260 : 300, P = { l: 42, r: 10, t: 12, b: 28 };
   const ys = [...w.now.w, ...w.fan.p10, ...w.fan.p90, 1];
   for (const a of w.top) ys.push(...a.w, ...a.f);
   let lo = Math.min(...ys), hi = Math.max(...ys);
@@ -813,9 +814,9 @@ function fanSvg(w, L) {
   return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block" role="img" aria-label="지금 차트와 비슷한 과거 차트, 그 뒤 10거래일">
     ${grid}
     <line x1="${X(0)}" x2="${X(0)}" y1="${P.t}" y2="${H - P.b}" stroke="var(--ink2)" stroke-dasharray="4 4"/>
-    <path d="${band("p10", "p90")}" fill="var(--accent)" opacity=".10"/><path d="${band("p25", "p75")}" fill="var(--accent)" opacity=".20"/>
+    <path d="${band("p10", "p90")}" fill="var(--s-violet)" opacity=".10"/><path d="${band("p25", "p75")}" fill="var(--s-violet)" opacity=".20"/>
     ${analogs}
-    <path d="${line(fx, [1, ...w.fan.p50])}" fill="none" stroke="var(--accent)" stroke-width="2.6"/>
+    <path d="${line(fx, [1, ...w.fan.p50])}" fill="none" stroke="var(--s-violet)" stroke-width="2.6"/>
     <path d="${line(w.now.x, w.now.w)}" fill="none" stroke="var(--ink)" stroke-width="2.6"/>
     <text x="${X(x0)}" y="${H - 8}" font-size="11" fill="var(--muted)">${L - 1}거래일 전</text>
     <text x="${X(0)}" y="${H - 8}" font-size="11" fill="var(--ink2)" text-anchor="middle">오늘</text>
@@ -865,6 +866,14 @@ function renderHelp() {
       <li>저점 구간 ↔ 고점 구간을 <b>3번 이상 왕복</b>해야 하고, 한 번 오갈 때 박스 높이의 절반 이상 움직여야 셉니다.</li>
       <li>고점들이나 저점들이 시간이 갈수록 한쪽으로 계속 올라가거나 내려가면(추세) 제외. 85% 이상의 날을 박스 근처에서 보내야 합니다.</li>
       <li>차트에서 빨강 ▼ = 고점, 파랑 ▲ = 저점, 빨강 점선 = 고점 구간, 파랑 점선 = 저점 구간입니다. 이 중 지금 저점 구간 근처(박스 위치 −30%~35%)인 종목만 목록에 나옵니다.</li></ul>
+    <h3>비슷한 차트 (similarchart.com 방식)</h3>
+    <ul><li>각 종목의 최근 8 · 16 · 32 · 64 · 128거래일 차트와 <b>가장 닮은 과거 차트 50개</b>를 시총 $1.5억 이상 미국 종목(약 3천 개)의 지난 5년에서 찾습니다.
+        닮음 = 가격 수준·변동 크기와 상관없는 모양의 상관계수, 하루 변동 크기가 0.5~2배인 차트만, 같은 종목의 겹치는 구간 제외, 한 종목에서 최대 2개.</li>
+      <li>그 50개가 <b>10거래일 뒤</b> 오른 비율(상승 비율)과 평균 등락으로 <b>점수 0~10</b>을 매깁니다. 5 = 과거 차트 전체 평균, 6 이상 = 상승 예상, 4 이하 = 하락 예상.
+        '종합'은 다섯 길이 점수의 평균입니다.</li>
+      <li><b>과거 검증</b> (2024.6~2026.9, 28개 시점 × 250종목, 그날까지 결과가 알려진 차트만 사용): 종합 점수 6 이상은 10거래일 뒤 <b>60.8%</b>가 올랐습니다
+        (전체 54.6%, 같은 날 평균보다 +1.2%p, 324건). 32거래일 차트 점수 6 이상은 57.5% (+2.2%p). 하지만 점수 전체의 순위 상관은 거의 0 (IC +0.01)이고
+        8 · 16 · 64일 점수는 차이가 없었습니다. <b>약한 참고 신호</b>로만 보세요.</li></ul>
     <h3>단계</h3>
     <ul><li><b>매수 검토</b>: 타이밍 점수 60 이상이고 위험이 '높음'이 아닌 종목</li><li><b>관찰</b>: 타이밍 40 이상</li><li><b>대기</b>: 그 밖</li></ul>
     <h3>타이밍 점수 (100점)</h3>
