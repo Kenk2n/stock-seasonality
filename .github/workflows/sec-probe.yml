@@ -1,5 +1,8 @@
 name: sec-probe
-on: workflow_dispatch
+on:
+  push:
+    branches: [claude/clever-euler-fo4jxz]
+    paths: [.github/workflows/sec-probe.yml]
 jobs:
   probe:
     runs-on: ubuntu-latest
