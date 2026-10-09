@@ -27,14 +27,8 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 from seasonality import accumulation as acc  # noqa: E402
-from seasonality import charts, data, earnings, patterns, rangebound as rb, report, universe  # noqa: E402
-
-WEIGHTS = {"box": 35, "bottom": 20, "krus": 20, "accum": 15, "volume": 10}
-REF = "KRUS"
-
-
-def clip01(x):
-    return float(np.clip(x, 0, 1)) if np.isfinite(x) else 0.0
+from seasonality import charts, data, patterns, picks, report, universe  # noqa: E402
+from seasonality.picks import REF, WEIGHTS  # noqa: E402
 
 
 def main() -> int:
@@ -65,66 +59,19 @@ def main() -> int:
     print(f"대상 {len(prices)}개 · 기준일 {end:%Y-%m-%d}")
 
     # 1) 박스: 종목마다 3·4·5년 중 점수 높은 기간
-    frames = []
-    for y in [int(v) for v in args.years.split(",")]:
-        frames.append(rb.scan_rangebound(prices, end - pd.DateOffset(years=y), end, 1.5, 0.35, args.min_legs).assign(years=y))
-    box = pd.concat(frames).sort_values(["passes", "score"], ascending=False).drop_duplicates("ticker")
-    box = box[box["passes"]].set_index("ticker")
+    box = picks.box_scan(prices, end, [int(v) for v in args.years.split(",")], args.min_legs)
     print(f"박스 왕복형 {len(box)}개")
 
-    # 2) 매집 신호: 전 종목 단면으로 계산(표준화 기준), 가격 고정 종목 표시
+    # 2) 매집 신호: 전 종목 단면으로 계산(표준화 기준)
     sig = acc.panel(prices)
     snap = acc.snapshot(sig, end, args.min_price, args.min_dollar_volume)
-    pinned = set(snap.index[(snap["contraction"] < 0.15) & (snap["pos52"] > 0.9)])
 
-    cand = box[box["pos"].between(args.pos_min, args.pos_max) & box.index.isin(snap.index) & ~box.index.isin(pinned)].copy()
-    cand = cand[cand.index != REF] if REF in cand.index and len(cand) > args.top else cand
-    print(f"박스 하단 근처 {len(cand)}개")
-    if len(cand) == 0:
+    # 3) 박스 하단 근처 후보 + 점수 (KRUS 닮음: 박스 폭 + 실적 지문)
+    x, eds = picks.box_candidates(prices, box, snap, end, args.pos_min, args.pos_max, REF)
+    print(f"박스 하단 근처 {len(x)}개")
+    if len(x) == 0:
         print("조건을 만족하는 종목이 없습니다.")
         return 1
-
-    # 3) KRUS 와 닮음: 박스 폭 + 실적 지문
-    ref_box = box.loc[REF] if REF in box.index else None
-    ref_band = float(ref_box["band"]) if ref_box is not None else 2.0
-    ref_ed = earnings.load_earnings_dates(REF)
-    start5 = end - pd.DateOffset(years=5)
-    ref_fp = earnings.earnings_fingerprint(prices[REF], ref_ed, start5, end)
-    with ThreadPoolExecutor(8) as ex:
-        eds = dict(zip(cand.index, ex.map(earnings.load_earnings_dates, cand.index)))
-
-    rows = []
-    z_stealth = acc._z(snap["stealth"])
-    z_cmf = acc._z(snap["cmf"])
-    for t, r in cand.iterrows():
-        df = prices[t]
-        c, v = df["Close"], df["Volume"]
-        fp = earnings.earnings_fingerprint(df, eds[t], start5, end) if len(eds[t]) else None
-        e_dist = earnings.fingerprint_distance(ref_fp, fp) if (fp and ref_fp) else np.nan
-        vol_ratio = v.tail(20).median() / v.tail(120).median() if v.tail(120).median() > 0 else np.nan
-        nxt = earnings.next_earnings(eds[t], end) if len(eds[t]) else None
-        s = {
-            "box": np.nan,  # 아래에서 순위로
-            "bottom": clip01(1 - abs(r["pos"] - 0.1) / 0.4),
-            "krus": 0.5 * np.exp(-abs(np.log(r["band"] / ref_band)) / 0.4) + 0.5 * (np.exp(-e_dist) if np.isfinite(e_dist) else 0.3),
-            "accum": clip01((z_stealth.get(t, 0) + z_cmf.get(t, 0)) / 4 + 0.5),
-            "volume": clip01((vol_ratio - 0.8) / 0.8),
-        }
-        rows.append({
-            "ticker": t, **{f"s_{k}": val for k, val in s.items()}, "box_score": r["score"],
-            "years": int(r["years"]), "band": r["band"], "low": r["low"], "high": r["high"], "legs": int(r["legs"]),
-            "trend_per_year": r["trend_per_year"], "peak_disp": r["peak_disp"], "trough_disp": r["trough_disp"],
-            "pos": r["pos"], "price": float(c.iloc[-1]), "to_high": r["high"] / float(c.iloc[-1]) - 1,
-            "to_low": float(c.iloc[-1]) / r["low"] - 1,
-            "rsi": float(patterns.rsi(c).iloc[-1]), "ret1m": float(c.iloc[-1] / c.iloc[-22] - 1),
-            "ret3m": float(c.iloc[-1] / c.iloc[-64] - 1), "vol_ratio": vol_ratio,
-            "dollar_volume": float(snap.loc[t, "dollar_volume"]), "stealth": float(snap.loc[t, "stealth"]),
-            "cmf": float(snap.loc[t, "cmf"]), "earn_dist": e_dist,
-            "react_abs": fp["react_abs"] if fp else np.nan, "next_earnings": nxt,
-        })
-    x = pd.DataFrame(rows).set_index("ticker")
-    x["s_box"] = x["box_score"].rank(pct=True)
-    x["raw"] = sum(WEIGHTS[k] * x[f"s_{k}"] for k in WEIGHTS)
 
     # 4) 기관·공매도·내부자 정보 (모든 후보)
     with ThreadPoolExecutor(8) as ex:
@@ -235,7 +182,7 @@ def main() -> int:
         ("차트 (노란 띠 = 박스, 점선 = 실적일)", figs),
     ]
     intro = (f"기준일 {end:%Y-%m-%d} · 미국 상장, 시총 ≥ ${args.min_mcap / 1e8:.0f}억, 거래대금 ≥ ${args.min_dollar_volume / 1e6:.0f}M, "
-             f"주가 ≥ ${args.min_price:.0f} · 박스 왕복형 {len(box)}개 중 하단 근처 {len(cand)}개에서 선정")
+             f"주가 ≥ ${args.min_price:.0f} · 박스 왕복형 {len(box)}개 중 하단 근처 {len(x)}개에서 선정")
     out.write_text(report.render_html([], "쿠라 스시형 박스권 · 박스 하단 후보", intro, sections, inline_js=args.inline_js),
                    encoding="utf-8")
     print(f"리포트: {out}")

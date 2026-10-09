@@ -6,8 +6,6 @@
 
 from __future__ import annotations
 
-import html
-
 import numpy as np
 import pandas as pd
 
@@ -144,34 +142,3 @@ def track_summary(tr: pd.DataFrame) -> pd.DataFrame:
                      "win": (x["excess"] > 0).mean(), "broke": (x["status"] == "박스 이탈").mean(),
                      "top": (x["status"] == "상단 도달").mean()})
     return pd.DataFrame(rows)
-
-
-# ---------------------------------------------------------------- HTML 조각
-
-def pct(v, signed=True, digits=1) -> str:
-    if v is None or not np.isfinite(v):
-        return ""
-    s = f"{v * 100:{'+' if signed else ''}.{digits}f}%"
-    if not signed:
-        return s
-    return f"<span class='{'pos' if v > 0 else 'neg' if v < 0 else ''}'>{s}</span>"
-
-
-def badge(text: str, kind: str = "") -> str:
-    return f"<span class='badge {kind}'>{html.escape(text)}</span>"
-
-
-STATUS_KIND = {"박스 이탈": "bad", "상단 도달": "good", "목록 유지": "", "목록 제외": "dim"}
-
-WATCH_CSS = """
-.badge{display:inline-block;font-size:11.5px;line-height:1;padding:3px 6px;border-radius:6px;margin-left:4px;
-  border:1px solid var(--line);color:var(--ink2);vertical-align:1px;white-space:nowrap}
-.badge.new{background:var(--up);border-color:var(--up);color:#fff}
-.badge.good{border-color:var(--up);color:var(--up)}.badge.bad{border-color:var(--down);color:var(--down)}
-.badge.dim{color:var(--muted)}
-.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:12px 0}
-.tile{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
-.tile .k{color:var(--muted);font-size:12.5px}.tile .v{font-size:22px;font-weight:600;margin-top:2px}
-.links a{display:inline-block;margin:4px 14px 4px 0;color:var(--down);text-decoration:none}
-td.l,th.l{text-align:left;white-space:normal;min-width:120px}
-"""

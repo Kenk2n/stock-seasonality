@@ -1,4 +1,4 @@
-# 평일 미국 장 마감 후 박스 하단·매집 후보를 스캔해서 gh-pages 브랜치(= GitHub Pages)에 올린다.
+# 평일 미국 장 마감 후 박스 하단권·매집 흔적 후보를 계산해서 gh-pages 브랜치(= GitHub Pages)에 올린다.
 # 예약 실행은 저장소 기본 브랜치에 있는 이 파일 기준으로만 동작한다.
 name: daily-watch
 
@@ -17,7 +17,7 @@ concurrency:
 jobs:
   scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
 
@@ -28,36 +28,34 @@ jobs:
 
       - run: pip install -r requirements.txt
 
-      # 주가·실적일·내부자 캐시 (매일 새 키로 저장하고 가장 최근 것을 복원)
+      # 주가·실적일·내부자·뉴스 캐시 (매일 새 키로 저장하고 가장 최근 것을 복원)
       - uses: actions/cache@v4
         with:
           path: data
           key: data-${{ github.run_id }}
           restore-keys: data-
 
-      # 이전 페이지와 기록(site/data/history.csv)을 가져온다. 첫 실행이면 빈 gh-pages 를 만든다.
-      - name: 이전 기록 가져오기
+      # 지난 기록(data/history.csv)만 가져온다. 첫 실행이면 건너뛴다.
+      - name: 지난 기록 가져오기
+        run: |
+          mkdir -p site/data
+          if git ls-remote --exit-code --heads origin gh-pages >/dev/null; then
+            git fetch --depth 1 origin gh-pages
+            git show FETCH_HEAD:data/history.csv > site/data/history.csv 2>/dev/null || rm -f site/data/history.csv
+          fi
+
+      - name: 스캔 + 사이트 만들기
+        run: python daily_watch.py --site site
+
+      # 차트 데이터가 매일 바뀌므로 이력을 쌓지 않고 커밋 1개로 덮어쓴다 (기록은 history.csv 안에 누적)
+      - name: gh-pages 에 올리기
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          url="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          if git ls-remote --exit-code --heads origin gh-pages >/dev/null; then
-            git clone --depth 1 --branch gh-pages "$url" site
-          else
-            mkdir site
-            git -C site init -b gh-pages
-            git -C site remote add origin "$url"
-          fi
-
-      - name: 스캔 + 페이지 만들기
-        run: python daily_watch.py --site site
-
-      - name: gh-pages 에 올리기
-        if: ${{ !cancelled() }}
-        run: |
           cd site
+          git init -q -b gh-pages
           git config user.name "github-actions[bot]"
           git config user.email "41898333+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "daily-watch $(date -u +%Y-%m-%d)" || { echo "변경 없음"; exit 0; }
-          git push origin gh-pages
+          git commit -q -m "daily-watch $(date -u +%Y-%m-%d)"
+          git push -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gh-pages
