@@ -1,9 +1,9 @@
 """타이밍 점수 과거 검증: 과거 날짜마다 그날까지의 데이터로 후보와 타이밍 점수를 다시 계산하고 이후 수익률과 비교.
 
   python timing_backtest.py                     # 2023.10 ~ 최근, 2개월 간격
-  python timing_backtest.py --step 1 --years 3  # 매달, 박스 기간 3년
+  python timing_backtest.py --step 1            # 매달
 
-박스 하단권: 그날 기준 3년 박스 + 박스 위치 −20%~30% → box_timing
+박스 하단권: 그날 기준 쿠라 스시형 박스(3·4·5년) + 박스 위치 −30%~35% → box_timing
 매집 흔적:   그날 기준 매집 점수 상위 40 → accum_timing
 비교: 타이밍 상위 절반 vs 하위 절반의 이후 1·3개월 수익률(S&P 500 대비), 순위 상관(IC)
 """
@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 from seasonality import accumulation as acc  # noqa: E402
 from seasonality import data, indicators, picks, timing, universe  # noqa: E402
-from seasonality import rangebound as rb  # noqa: E402
+from seasonality import swingbox as sb  # noqa: E402
 
 
 def fwd(c: pd.Series, d: pd.Timestamp, n: int) -> float:
@@ -50,7 +50,6 @@ def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--start", default="2023-10-01")
     p.add_argument("--step", type=int, default=2, help="몇 달 간격")
-    p.add_argument("--years", type=int, default=3, help="박스 기간")
     p.add_argument("--out", default="results/timing_backtest.csv")
     args = p.parse_args()
     logging.basicConfig(level=logging.ERROR)
@@ -79,8 +78,8 @@ def main() -> int:
     for d in dates:
         # 박스 하단권
         box_px = {t: df[df.index <= d] for t, df in prices.items() if t in big and (df.index <= d).sum() > 500}
-        box = rb.scan_rangebound(box_px, d - pd.DateOffset(years=args.years), d, 1.5, 0.35, 4)
-        box = box[box["passes"] & box["pos"].between(-0.2, 0.3)].set_index("ticker")
+        box = sb.scan(box_px, d)
+        box = box[box["pos"].between(-0.3, 0.35)] if len(box) else box
         snap = acc.snapshot({t: sig[t] for t in box.index if t in sig}, d, 3, 2e6) if len(box) else pd.DataFrame()
         pinned = picks.pinned_tickers(snap) if len(snap) else set()
         sp21, sp63 = fwd(spy, d, 21), fwd(spy, d, 63)
@@ -89,7 +88,8 @@ def main() -> int:
                 continue
             df = prices[t]
             m = df.index <= d
-            tm = timing.box_timing(df[m], ind_of(t)[m], r["low"], r["high"], r["pos"])
+            pl = picks.plan(r)
+            tm = timing.box_timing(df[m], ind_of(t)[m], r["pos"], pl["stop"], pl["target"])
             rows.append({"date": d, "list": "box", "ticker": t, "timing": tm["timing"],
                          "x21": fwd(df["Close"], d, 21) - sp21, "x63": fwd(df["Close"], d, 63) - sp63})
         # 매집 흔적

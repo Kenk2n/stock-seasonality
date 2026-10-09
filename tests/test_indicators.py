@@ -60,11 +60,12 @@ def test_box_timing_prefers_bottom_rebound():
     base = 20 + rng.normal(0, 0.3, 300)
     bottom = _ohlcv(np.r_[base, np.linspace(base[-1], 14, 30), np.linspace(14, 14.8, 6)])
     top = _ohlcv(np.r_[base, np.linspace(base[-1], 27, 36)])
-    tb = timing.box_timing(bottom, ind.compute(bottom), low=14.0, high=28.0, pos=0.05)
-    tt = timing.box_timing(top, ind.compute(top), low=14.0, high=28.0, pos=0.95)
+    tb = timing.box_timing(bottom, ind.compute(bottom), pos=0.05, stop=12.0, target=26.0)
+    tt = timing.box_timing(top, ind.compute(top), pos=0.95, stop=12.0, target=26.0)
     assert tb["timing"] > tt["timing"] + 20
     assert tb["rr"] > 3 and 0 <= tb["timing"] <= 100
-    assert timing.box_timing(bottom, ind.compute(bottom), 20.0, 40.0, -0.5)["parts"]["pos"] == 0
+    assert tt["rr"] == 0  # 목표가를 이미 넘음
+    assert timing.box_timing(bottom, ind.compute(bottom), -0.5, 10.0, 26.0)["parts"]["pos"] == 0
 
 
 def test_accum_timing_range_and_stage():

@@ -38,9 +38,8 @@ def main() -> int:
     p.add_argument("--min-dollar-volume", type=float, default=5e6)
     p.add_argument("--min-price", type=float, default=5.0)
     p.add_argument("--years", default="3,4,5")
-    p.add_argument("--min-legs", type=int, default=4)
-    p.add_argument("--pos-min", type=float, default=-0.2)
-    p.add_argument("--pos-max", type=float, default=0.3)
+    p.add_argument("--pos-min", type=float, default=-0.3)
+    p.add_argument("--pos-max", type=float, default=0.35)
     p.add_argument("--top", type=int, default=20)
     p.add_argument("--refresh", action="store_true")
     p.add_argument("--out", default="reports/box_picks.html")
@@ -59,8 +58,8 @@ def main() -> int:
     print(f"대상 {len(prices)}개 · 기준일 {end:%Y-%m-%d}")
 
     # 1) 박스: 종목마다 3·4·5년 중 점수 높은 기간
-    box = picks.box_scan(prices, end, [int(v) for v in args.years.split(",")], args.min_legs)
-    print(f"박스 왕복형 {len(box)}개")
+    box = picks.box_scan(prices, end, [int(v) for v in args.years.split(",")])
+    print(f"쿠라 스시형 박스 {len(box)}개")
 
     # 2) 매집 신호: 전 종목 단면으로 계산(표준화 기준)
     sig = acc.panel(prices)

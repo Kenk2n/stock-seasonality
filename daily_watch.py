@@ -117,9 +117,17 @@ def chart_payload(t: str, df: pd.DataFrame, ind: pd.DataFrame, eds, box_row=None
     }
     if box_row is not None:
         start = df.index[-1] - pd.DateOffset(years=int(box_row["years"]))
-        out["box"] = {"low": box_row["low"], "high": box_row["high"], "start": start.strftime("%Y-%m-%d"),
-                      "stop": box_row["low"] * timing.BOX_STOP}
+        out["box"] = {"lm": box_row["lm"], "hm": box_row["hm"], "low_zone": list(box_row["low_zone"]),
+                      "high_zone": list(box_row["high_zone"]), "start": start.strftime("%Y-%m-%d"),
+                      "stop": box_row["stop"], "target": box_row["target"], "swings": box_row["swings"]}
     return out
+
+
+def weekly_spark(c: pd.Series, years: int, asof: pd.Timestamp) -> dict:
+    """박스 기간의 주봉 종가 (차트 모아보기용)."""
+    w = c[c.index > asof - pd.DateOffset(years=years)].resample("W-FRI").last().dropna()
+    return {"start": w.index[0].strftime("%Y-%m-%d"), "end": w.index[-1].strftime("%Y-%m-%d"),
+            "v": rlist(w, price_decimals(c))}
 
 
 # ---------------------------------------------------------------- 메인
@@ -170,7 +178,7 @@ def main() -> int:
     box = picks.box_scan(box_prices, asof)
     box_x, eds = picks.box_candidates(box_prices, box, box_snap, asof)
     box_x = box_x.head(args.box_max)
-    step(f"박스 왕복형 {len(box)}개 → 하단 근처 {len(box_x)}개")
+    step(f"쿠라 스시형 박스 {len(box)}개 → 저점 구간 근처 {len(box_x)}개")
 
     # 3) 매집 흔적 (소형주 포함)
     snap = acc.snapshot(sig, asof, args.acc_min_price, args.acc_min_dv)
@@ -225,7 +233,7 @@ def main() -> int:
     if charts_dir.exists():
         shutil.rmtree(charts_dir)
 
-    def common(t: str, df: pd.DataFrame, ind: pd.DataFrame, pos=None) -> dict:
+    def common(t: str, df: pd.DataFrame, ind: pd.DataFrame, floor=None) -> dict:
         prof = profiles.get(t, {})
         c = df["Close"]
         price = float(c.iloc[-1])
@@ -234,7 +242,7 @@ def main() -> int:
         etf = risk.etf_for(prof.get("sector"), prof.get("industry"))
         flags = (risk.news_flags(news.get(t, []), asof) + risk.sec_flags(sec.get(t, []), asof)
                  + risk.analyst_flags(analyst.get(t, []), asof) + risk.finance_flags(prof, price)
-                 + risk.price_flags(df, pos, nxt, asof, dv) + risk.sector_flags(etf, sector_tab))
+                 + risk.price_flags(df, None, nxt, asof, dv, floor=floor) + risk.sector_flags(etf, sector_tab))
         tx = insider.get(t)
         buys = acc.insider_buys(tx) if tx is not None and len(tx) else pd.DataFrame()
         ib90 = float(buys.loc[buys["date"] >= asof - pd.Timedelta(days=90), "value"].sum()) if len(buys) else 0.0
@@ -262,12 +270,18 @@ def main() -> int:
     for t, r in box_x.iterrows():
         df = box_prices[t]
         ind = indicators.compute(df)
-        tm = timing.box_timing(df, ind, r["low"], r["high"], r["pos"])
-        row = common(t, df, ind, pos=r["pos"])
+        tm = timing.box_timing(df, ind, r["pos"], r["stop"], r["target"])
+        row = common(t, df, ind, floor=r["low_zone"][0])
+        ok = [x for x in r["swings"] if x["ok"]]
         row.update({
             "score": r["raw"], "timing": tm["timing"], "parts": tm["parts"], "rr": tm["rr"], "stop": tm["stop"],
             "target": tm["target"], "stage": timing.stage(tm["timing"], row["risk"]["level"]),
-            "box": {k: r[k] for k in ("low", "high", "years", "band", "legs", "pos", "to_high", "to_low", "trend_per_year")},
+            "box": {**{k: r[k] for k in ("years", "amp", "lm", "hm", "round_trips", "n_high", "n_low", "pos",
+                                         "to_target", "to_stop", "valid_frac", "inside")},
+                    "low_zone": list(r["low_zone"]), "high_zone": list(r["high_zone"]),
+                    "highs": [x["p"] for x in ok if x["k"] == "H"], "lows": [x["p"] for x in ok if x["k"] == "L"],
+                    "swings": r["swings"]},
+            "is_ref": bool(r["is_ref"]), "spark_w": weekly_spark(df["Close"], int(r["years"]), asof),
             "krus": r["earn_dist"], "s": {k[2:]: r[k] for k in r.index if k.startswith("s_")},
             "stealth": r["stealth"], "cmf": r["cmf"], "vol_ratio": r["vol_ratio"], "in_accum": t in acc_x.index,
             "new": t in new["box"], "streak": streak["box"].get(t, 1), "first_seen": first_seen["box"].get(t),
