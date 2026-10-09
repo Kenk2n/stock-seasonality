@@ -365,7 +365,9 @@ def finance_flags(p: dict, price: float) -> list[dict]:
 
 
 def price_flags(df: pd.DataFrame, pos: float | None = None, next_earnings: pd.Timestamp | None = None,
-                asof: pd.Timestamp | None = None, dollar_volume: float | None = None) -> list[dict]:
+                asof: pd.Timestamp | None = None, dollar_volume: float | None = None,
+                floor: float | None = None) -> list[dict]:
+    """floor = 쿠라 스시형 박스에서 지난 저점들 중 가장 낮은 저점 (있으면 pos 대신 이것으로 박스 이탈 판단)."""
     c = df["Close"].dropna()
     price = float(c.iloc[-1])
     asof = pd.Timestamp(asof or c.index[-1])
@@ -378,7 +380,14 @@ def price_flags(df: pd.DataFrame, pos: float | None = None, next_earnings: pd.Ti
         r3 = price / c.iloc[-64] - 1
         if r3 < -0.3:
             flags.append({"cat": "price", "level": "mid", "label": f"3개월 {r3 * 100:+.0f}% 급락", "detail": "떨어지는 칼날일 수 있음"})
-    if pos is not None and np.isfinite(pos):
+    if floor is not None and np.isfinite(floor):
+        if price < floor * 0.95:
+            flags.append({"cat": "price", "level": "high", "label": "박스 이탈",
+                          "detail": f"지난 저점들 중 가장 낮은 ${floor:,.2f} 보다 5% 넘게 아래 → 박스가 깨졌을 수 있음"})
+        elif price < floor:
+            flags.append({"cat": "price", "level": "mid", "label": "지난 최저 저점 아래",
+                          "detail": f"지난 저점들 중 가장 낮은 ${floor:,.2f} 아래, 더 밀리면 박스가 깨짐"})
+    elif pos is not None and np.isfinite(pos):
         if pos < -0.15:
             flags.append({"cat": "price", "level": "high", "label": "박스 이탈", "detail": f"박스 하단보다 크게 아래 (위치 {pos * 100:.0f}%)"})
         elif pos < 0:

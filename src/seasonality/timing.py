@@ -1,8 +1,9 @@
 """매수 타이밍 점수 (0~100). 높을수록 '지금이 들어갈 만한 자리'에 가깝다는 뜻일 뿐, 수익을 보장하지 않는다.
 
-박스 하단형 (box_timing)
-  박스 안 위치 25 · 손익비 20 · RSI 반등 15 · MACD 전환 15 · 볼린저 하단 복귀 10 · 스토캐스틱 RSI 8 · 슈퍼트렌드 7
-  손익비 = (박스 상단 − 현재가) / (현재가 − 손절가), 손절가 = 박스 하단 × 0.92
+박스 하단형 (box_timing) — 쿠라 스시형 박스 (swingbox.py)
+  저점 구간 근접 25 · 손익비 20 · RSI 반등 15 · MACD 전환 15 · 볼린저 하단 복귀 10 · 스토캐스틱 RSI 8 · 슈퍼트렌드 7
+  손익비 = (목표가 − 현재가) / (현재가 − 손절가)
+  목표가 = 지난 고점들 중 가장 낮은 고점, 손절가 = 지난 저점들 중 가장 낮은 저점 × 0.95 (picks.plan)
 
 매집 흔적형 (accum_timing)
   매집 점수 순위 30 · 변동성 수축 15 · OBV 상승(주가 정체) 15 · 최근 거래량 증가 15 · 추세 회복 15 · RSI 중립대 10
@@ -15,10 +16,9 @@ import pandas as pd
 
 BOX_WEIGHTS = {"pos": 25, "rr": 20, "rsi": 15, "macd": 15, "bb": 10, "stoch": 8, "st": 7}
 ACC_WEIGHTS = {"accum": 30, "squeeze": 15, "obv": 15, "volume": 15, "trend": 15, "rsi": 10}
-BOX_STOP = 0.92
 
 LABELS = {
-    "pos": "박스 하단 근접", "rr": "손익비", "rsi": "RSI 반등", "macd": "MACD 전환", "bb": "볼린저 하단",
+    "pos": "저점 구간 근접", "rr": "손익비", "rsi": "RSI 반등", "macd": "MACD 전환", "bb": "볼린저 하단",
     "stoch": "스토캐스틱 RSI", "st": "슈퍼트렌드", "accum": "매집 점수", "squeeze": "변동성 수축",
     "obv": "OBV 상승", "volume": "거래량 증가", "trend": "추세 회복",
 }
@@ -68,15 +68,15 @@ def _st_part(ind: pd.DataFrame) -> float:
     return 0.0
 
 
-def box_timing(df: pd.DataFrame, ind: pd.DataFrame, low: float, high: float, pos: float) -> dict:
+def box_timing(df: pd.DataFrame, ind: pd.DataFrame, pos: float, stop: float, target: float) -> dict:
+    """pos = 박스 위치 (0 = 기준 저점, 1 = 기준 고점)."""
     c = df["Close"]
     price = float(c.iloc[-1])
     r = ind["rsi"]
     rising = len(r) > 3 and r.iloc[-1] > r.iloc[-4]
-    stop = low * BOX_STOP
-    rr = (high - price) / (price - stop) if price > stop else 0.0
+    rr = (target - price) / (price - stop) if price > stop and target > price else 0.0
     parts = {
-        "pos": 0.0 if pos < -0.15 else _c01(1 - abs(pos - 0.05) / 0.35),
+        "pos": 0.0 if pos < -0.3 else _c01(1 - abs(pos - 0.05) / 0.4),
         "rr": _c01(rr / 5),
         "rsi": _c01((55 - r.iloc[-1]) / 25) * (1.0 if rising else 0.5),
         "macd": _macd_part(ind),
@@ -86,7 +86,7 @@ def box_timing(df: pd.DataFrame, ind: pd.DataFrame, low: float, high: float, pos
     }
     score = sum(BOX_WEIGHTS[k] * v for k, v in parts.items())
     return {"timing": round(score, 1), "parts": {k: round(v, 2) for k, v in parts.items()},
-            "rr": round(rr, 2), "stop": round(stop, 4), "target": round(high, 4)}
+            "rr": round(rr, 2), "stop": round(stop, 4), "target": round(target, 4)}
 
 
 def accum_timing(df: pd.DataFrame, ind: pd.DataFrame, accum_pct: float) -> dict:

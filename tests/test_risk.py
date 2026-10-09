@@ -68,6 +68,10 @@ def test_finance_price_sector_flags():
     cats = {f["cat"] for f in fl}
     assert {"pump", "price", "earnings", "liquidity"} <= cats
 
+    fl = risk.price_flags(df, floor=6.5)  # 지난 최저 저점 6.5 → 현재 6.0 은 5% 넘게 아래
+    assert any(f["label"] == "박스 이탈" and f["level"] == "high" for f in fl)
+    assert not any(f["label"] == "박스 이탈" for f in risk.price_flags(df, floor=5.0))
+
     closes = {"SPY": pd.Series(np.linspace(100, 120, 260)), "XBI": pd.Series(np.linspace(120, 90, 260)),
               "XLU": pd.Series(np.linspace(100, 104, 260))}
     tab = risk.sector_table(closes)

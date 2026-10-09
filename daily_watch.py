@@ -33,6 +33,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from seasonality import accumulation as acc  # noqa: E402
 from seasonality import data, earnings, indicators, picks, risk, timing, universe, watch  # noqa: E402
+from seasonality import similar as sim  # noqa: E402
 
 KST = timezone(timedelta(hours=9))
 log = logging.getLogger("daily_watch")
@@ -117,9 +118,49 @@ def chart_payload(t: str, df: pd.DataFrame, ind: pd.DataFrame, eds, box_row=None
     }
     if box_row is not None:
         start = df.index[-1] - pd.DateOffset(years=int(box_row["years"]))
-        out["box"] = {"low": box_row["low"], "high": box_row["high"], "start": start.strftime("%Y-%m-%d"),
-                      "stop": box_row["low"] * timing.BOX_STOP}
+        out["box"] = {"lm": box_row["lm"], "hm": box_row["hm"], "low_zone": list(box_row["low_zone"]),
+                      "high_zone": list(box_row["high_zone"]), "start": start.strftime("%Y-%m-%d"),
+                      "stop": box_row["stop"], "target": box_row["target"], "swings": box_row["swings"]}
     return out
+
+
+def weekly_spark(c: pd.Series, years: int, asof: pd.Timestamp) -> dict:
+    """박스 기간의 주봉 종가 (차트 모아보기용)."""
+    w = c[c.index > asof - pd.DateOffset(years=years)].resample("W-FRI").last().dropna()
+    return {"start": w.index[0].strftime("%Y-%m-%d"), "end": w.index[-1].strftime("%Y-%m-%d"),
+            "v": rlist(w, price_decimals(c))}
+
+
+SIM_TOP = 6  # 종목마다 그림으로 보여 줄 비슷한 과거 차트 수 (길이마다)
+
+
+def similar_charts(prices: dict[str, pd.DataFrame], step) -> tuple[dict, dict, dict]:
+    """종목마다 길이(8~128거래일)별로 가장 비슷한 과거 차트 50개와 그 뒤 10거래일 → (요약, 종목별 상세, 기준값)."""
+    series = sim.Series.from_prices(prices)
+    summary = {t: {} for t in series.tickers}
+    detail = {t: {} for t in series.tickers}
+    bases = {}
+    for L in sim.LENGTHS:
+        lib = sim.build(series, L)
+        bases[str(L)] = lib.base()
+        qs = [(i, len(lc) - 1) for i, lc in enumerate(series.logc) if len(lc) > L + 5]
+        for (i, e), st in zip(qs, sim.search(lib, series, qs)):
+            if st.get("n", 0) < 10:
+                continue
+            t, sc = series.tickers[i], sim.score(st, bases[str(L)])
+            summary[t][str(L)] = [round(sc, 2), round(st["rise"], 3), round(st["avg"], 4), st["n"]]
+            top = [{"t": series.tickers[int(lib.tick[r])], "s": round(float(sv), 3), "r": round(float(lib.fut[r]), 4),
+                    **sim.path(series, int(lib.tick[r]), int(lib.end[r]), L)}
+                   for r, sv in zip(st["rows"][:SIM_TOP], st["sims"][:SIM_TOP])]
+            detail[t][str(L)] = {"score": sc, "rise": st["rise"], "avg": st["avg"], "med": st["med"], "n": st["n"],
+                                 "sim": st["sim"], "now": sim.path(series, i, e, L, horizon=0),
+                                 "fan": sim.fan(lib, series, st["rows"]), "top": top}
+        del lib
+        step(f"비슷한 차트 {L}거래일: {len(qs)}종목")
+    for t, r in summary.items():
+        sc = [v[0] for v in r.values() if v[0] is not None and np.isfinite(v[0])]
+        r["total"] = round(float(np.mean(sc)), 2) if sc else None
+    return summary, detail, bases
 
 
 # ---------------------------------------------------------------- 메인
@@ -138,6 +179,7 @@ def main() -> int:
     p.add_argument("--box-max", type=int, default=40)
     p.add_argument("--lookback", type=int, default=180, help="성과 추적 기간(일)")
     p.add_argument("--cache-days", type=float, default=7)
+    p.add_argument("--no-similar", action="store_true", help="비슷한 차트 계산 건너뛰기 (개발용)")
     args = p.parse_args()
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
     logging.getLogger("yfinance").setLevel(logging.CRITICAL)
@@ -170,7 +212,7 @@ def main() -> int:
     box = picks.box_scan(box_prices, asof)
     box_x, eds = picks.box_candidates(box_prices, box, box_snap, asof)
     box_x = box_x.head(args.box_max)
-    step(f"박스 왕복형 {len(box)}개 → 하단 근처 {len(box_x)}개")
+    step(f"쿠라 스시형 박스 {len(box)}개 → 저점 구간 근처 {len(box_x)}개")
 
     # 3) 매집 흔적 (소형주 포함)
     snap = acc.snapshot(sig, asof, args.acc_min_price, args.acc_min_dv)
@@ -225,7 +267,7 @@ def main() -> int:
     if charts_dir.exists():
         shutil.rmtree(charts_dir)
 
-    def common(t: str, df: pd.DataFrame, ind: pd.DataFrame, pos=None) -> dict:
+    def common(t: str, df: pd.DataFrame, ind: pd.DataFrame, floor=None) -> dict:
         prof = profiles.get(t, {})
         c = df["Close"]
         price = float(c.iloc[-1])
@@ -234,7 +276,7 @@ def main() -> int:
         etf = risk.etf_for(prof.get("sector"), prof.get("industry"))
         flags = (risk.news_flags(news.get(t, []), asof) + risk.sec_flags(sec.get(t, []), asof)
                  + risk.analyst_flags(analyst.get(t, []), asof) + risk.finance_flags(prof, price)
-                 + risk.price_flags(df, pos, nxt, asof, dv) + risk.sector_flags(etf, sector_tab))
+                 + risk.price_flags(df, None, nxt, asof, dv, floor=floor) + risk.sector_flags(etf, sector_tab))
         tx = insider.get(t)
         buys = acc.insider_buys(tx) if tx is not None and len(tx) else pd.DataFrame()
         ib90 = float(buys.loc[buys["date"] >= asof - pd.Timedelta(days=90), "value"].sum()) if len(buys) else 0.0
@@ -262,12 +304,18 @@ def main() -> int:
     for t, r in box_x.iterrows():
         df = box_prices[t]
         ind = indicators.compute(df)
-        tm = timing.box_timing(df, ind, r["low"], r["high"], r["pos"])
-        row = common(t, df, ind, pos=r["pos"])
+        tm = timing.box_timing(df, ind, r["pos"], r["stop"], r["target"])
+        row = common(t, df, ind, floor=r["low_zone"][0])
+        ok = [x for x in r["swings"] if x["ok"]]
         row.update({
             "score": r["raw"], "timing": tm["timing"], "parts": tm["parts"], "rr": tm["rr"], "stop": tm["stop"],
             "target": tm["target"], "stage": timing.stage(tm["timing"], row["risk"]["level"]),
-            "box": {k: r[k] for k in ("low", "high", "years", "band", "legs", "pos", "to_high", "to_low", "trend_per_year")},
+            "box": {**{k: r[k] for k in ("years", "amp", "lm", "hm", "round_trips", "n_high", "n_low", "pos",
+                                         "to_target", "to_stop", "valid_frac", "inside")},
+                    "low_zone": list(r["low_zone"]), "high_zone": list(r["high_zone"]),
+                    "highs": [x["p"] for x in ok if x["k"] == "H"], "lows": [x["p"] for x in ok if x["k"] == "L"],
+                    "swings": r["swings"]},
+            "is_ref": bool(r["is_ref"]), "spark_w": weekly_spark(df["Close"], int(r["years"]), asof),
             "krus": r["earn_dist"], "s": {k[2:]: r[k] for k in r.index if k.startswith("s_")},
             "stealth": r["stealth"], "cmf": r["cmf"], "vol_ratio": r["vol_ratio"], "in_accum": t in acc_x.index,
             "new": t in new["box"], "streak": streak["box"].get(t, 1), "first_seen": first_seen["box"].get(t),
@@ -291,7 +339,34 @@ def main() -> int:
             write_json(charts_dir / f"{t}.json", chart_payload(t, df, ind, eds.get(t, []), None, row["first_seen"]))
     step(f"지표·타이밍·위험 계산 (박스 {len(rows['box'])}, 매집 {len(rows['accum'])})")
 
-    # 7) 이전 후보 성과
+    # 7) 비슷한 차트 (similarchart 방식): 박스 대상 종목 전체 + 매집 후보
+    sim_summary, sim_detail, sim_bases = {}, {}, {}
+    if not args.no_similar:
+        sim_px = {**box_prices, **{t: prices[t] for t in acc_x.index if t in prices}}
+        sim_summary, sim_detail, sim_bases = similar_charts(sim_px, step)
+        for k in rows:
+            for row in rows[k]:
+                row["sim"] = sim_summary.get(row["t"])
+    sim_dir = site / "data" / "similar"
+    if sim_dir.exists():
+        shutil.rmtree(sim_dir)
+    if sim_summary:
+        in_box, in_acc = set(box_x.index), set(acc_x.index)
+        srows = []
+        for t, r in sim_summary.items():
+            if r.get("total") is None:
+                continue
+            c = (box_prices.get(t) if t in box_prices else prices[t])["Close"]
+            srows.append({"t": t, "name": meta["name"].get(t, ""), "mcap": meta["market_cap"].get(t),
+                          "price": float(c.iloc[-1]), "chg1d": float(c.iloc[-1] / c.iloc[-2] - 1),
+                          "box": t in in_box, "accum": t in in_acc, "s": {k: v for k, v in r.items() if k != "total"},
+                          "total": r["total"]})
+            write_json(sim_dir / f"{t}.json", {"t": t, "name": meta["name"].get(t, ""), "asof": asof, "w": sim_detail[t]})
+        write_json(sim_dir / "summary.json", {"asof": asof, "lengths": list(sim.LENGTHS), "horizon": sim.HORIZON,
+                                              "k": sim.K, "bases": sim_bases, "rows": srows})
+        step(f"비슷한 차트 저장: {len(srows)}종목")
+
+    # 8) 이전 후보 성과
     recent = hist[hist["date"] >= asof - pd.Timedelta(days=args.lookback)]
     need = sorted(set(recent["ticker"]) - set(prices))
     extra = data.update_ohlc(need, refresh=not args.no_refresh) if need else {}
@@ -302,7 +377,7 @@ def main() -> int:
         tracking[k] = {"rows": tr.to_dict("records") if len(tr) else [],
                        "summary": watch.track_summary(tr).to_dict("records") if len(tr) else []}
 
-    # 8) 쓰기
+    # 9) 쓰기
     if Path(args.web).exists():
         shutil.copytree(args.web, site, dirs_exist_ok=True)
     (site / ".nojekyll").touch()
@@ -316,7 +391,7 @@ def main() -> int:
         "changes": {k: {"new": sorted(new[k]), "dropped": new[k + "_dropped"]} for k in watch.LIST_NAMES},
         "sectors": sector_tab.reset_index().sort_values("vs_spy3m").to_dict("records") if len(sector_tab) else [],
         "tracking": tracking,
-        "risk_categories": risk.CATEGORIES, "sec_enabled": bool(cik_map),
+        "risk_categories": risk.CATEGORIES, "sec_enabled": bool(cik_map), "similar": bool(sim_summary),
         "weights": {"box": timing.BOX_WEIGHTS, "accum": timing.ACC_WEIGHTS, "labels": timing.LABELS},
     }
     write_json(site / "data" / "latest.json", latest)
