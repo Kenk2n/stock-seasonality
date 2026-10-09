@@ -6,12 +6,15 @@ flag 한 개 = {"cat": 분류, "level": high|mid|low, "label": 짧은 이름, "d
 
 from __future__ import annotations
 
+import gzip
 import json
 import logging
 import os
 import re
 import time
+import urllib.error
 import urllib.request
+import zlib
 import xml.etree.ElementTree as ET
 from datetime import timezone
 from email.utils import parsedate_to_datetime
@@ -67,9 +70,19 @@ def classify_headline(title: str) -> list[tuple[str, str, str]]:
 
 
 def _get(url: str, ua: str = UA, timeout: float = 20) -> bytes:
-    req = urllib.request.Request(url, headers={"User-Agent": ua, "Accept-Encoding": "identity"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return r.read()
+    req = urllib.request.Request(url, headers={"User-Agent": ua, "Accept-Encoding": "gzip, deflate", "Accept": "*/*"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            body = r.read()
+            enc = (r.headers.get("Content-Encoding") or "").lower()
+    except urllib.error.HTTPError as e:  # 거절 사유가 본문에 있으면 로그로 남긴다
+        detail = e.read()[:300].decode("utf-8", "replace") if e.fp else ""
+        raise RuntimeError(f"HTTP {e.code} {url} {' '.join(detail.split())[:200]}") from None
+    if enc == "gzip":
+        body = gzip.decompress(body)
+    elif enc == "deflate":
+        body = zlib.decompress(body)
+    return body
 
 
 def _cached_json(path: Path, max_age_h: float, fetch):
