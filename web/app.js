@@ -33,6 +33,7 @@ const S = {
   period: { box: store.get("period.box", "BOX"), accum: store.get("period.accum", "1Y") },
   chk: store.get("chk", {}), memo: store.get("memo", {}),
   charts: new Map(), cur: null, chart: null,
+  sim: { data: null, L: store.get("simL", "all"), dL: store.get("simDL", "32"), q: "", mcap: "all", files: new Map() },
 };
 
 // ---------------------------------------------------------------- 형식
@@ -335,7 +336,7 @@ async function loadChart(t) {
 }
 
 function openDetail(list, rows, i) {
-  S.cur = { list, rows, i };
+  S.cur = { kind: "list", list, rows, i };
   $("#drawer").hidden = false;
   document.body.style.overflow = "hidden";
   renderDetail();
@@ -346,6 +347,7 @@ function closeDetail() {
   if (S.chart) { S.chart.remove(); S.chart = null; }
   history.replaceState(null, "", "#" + S.tab);
   if (LISTS[S.tab]) renderList(S.tab);
+  else if (S.tab === "similar") renderSim();
 }
 function navDetail(step) {
   if (!S.cur) return;
@@ -363,6 +365,11 @@ function flagHtml(f, cats) {
 }
 
 function renderDetail() {
+  if (S.cur.kind === "sim") return renderSimDetail();
+  return renderListDetail();
+}
+
+function renderListDetail() {
   const { list, rows, i } = S.cur;
   const r = rows[i];
   const D = S.data;
@@ -426,6 +433,8 @@ function renderDetail() {
         <div class="card"><ul class="list">${sigs}</ul>
           <p class="note" style="margin:8px 0 0">RSI ${num(r.ind.rsi)} · 스토캐스틱 RSI ${num(r.ind.stoch_k)} · MFI ${num(r.ind.mfi)} · ADX ${num(r.ind.adx)} · 볼린저 %B ${num(r.ind.bb_pctb, 2)} ·
           50일선 대비 ${pct(r.ind.vs_sma50)} · 200일선 대비 ${pct(r.ind.vs_sma200)} · 하루 변동폭(ATR) ${pct(r.ind.atr_pct, 1, false)} · 슈퍼트렌드 ${r.ind.st_dir === 1 ? "상승" : r.ind.st_dir === -1 ? "하락" : "–"}</p></div>
+        <h3>비슷한 차트들로 본 10거래일 뒤</h3>
+        <div class="card" id="simcard">${D.similar && r.sim ? `<p class="note">불러오는 중…</p>` : `<p class="note">이 종목은 비슷한 차트 분석 대상이 아닙니다 (시총 $1.5억 이상 종목만).</p>`}</div>
         <h3>최근 뉴스</h3>
         <div class="card"><ul class="list">${news}</ul></div>
         ${analyst || filings ? `<h3>애널리스트 · 공시</h3><div class="card"><ul class="list">${analyst}${filings}</ul></div>` : ""}
@@ -456,6 +465,7 @@ function renderDetail() {
   $("#ovs").onclick = (e) => { const b = e.target.closest("[data-ov]"); if (!b) return; S.ov[b.dataset.ov] = !S.ov[b.dataset.ov]; store.set("ov", S.ov); drawChart(r, list); b.classList.toggle("on"); };
   $("#pns").onclick = (e) => { const b = e.target.closest("[data-pn]"); if (!b) return; S.panes[b.dataset.pn] = !S.panes[b.dataset.pn]; store.set("panes", S.panes); drawChart(r, list); b.classList.toggle("on"); };
   drawChart(r, list);
+  if (D.similar && r.sim) simBlock(r.t, $("#simcard"), false);
 }
 
 function toggleCheck() {
@@ -634,6 +644,185 @@ function fmtVol(v) {
   return a >= 1e9 ? (v / 1e9).toFixed(1) + "B" : a >= 1e6 ? (v / 1e6).toFixed(1) + "M" : a >= 1e3 ? (v / 1e3).toFixed(0) + "K" : v.toFixed(0);
 }
 
+// ---------------------------------------------------------------- 비슷한 차트 (similarchart 방식)
+const SIM_LS = [["all", "종합"], ["8", "8일"], ["16", "16일"], ["32", "32일"], ["64", "64일"], ["128", "128일"]];
+
+function simVal(r, L) {
+  if (L !== "all") { const v = r.s[L]; return v ? { score: v[0], rise: v[1], avg: v[2], n: v[3] } : null; }
+  const vs = Object.values(r.s).filter((v) => v && fin(v[0]));
+  if (!vs.length || !fin(r.total)) return null;
+  const m = (k) => vs.reduce((a, v) => a + v[k], 0) / vs.length;
+  return { score: r.total, rise: m(1), avg: m(2), n: Math.round(m(3)) };
+}
+
+async function loadSim() {
+  if (!S.sim.data) {
+    const res = await fetch("data/similar/summary.json", { cache: "no-cache" });
+    if (!res.ok) throw new Error("비슷한 차트 데이터가 아직 없습니다");
+    S.sim.data = await res.json();
+  }
+  return S.sim.data;
+}
+
+async function loadSimFile(t) {
+  if (S.sim.files.has(t)) return S.sim.files.get(t);
+  const res = await fetch(`data/similar/${encodeURIComponent(t)}.json`);
+  if (!res.ok) throw new Error(`${t}: 비슷한 차트 분석 대상이 아닙니다 (시총 $1.5억 이상 미국 종목)`);
+  const j = await res.json();
+  S.sim.files.set(t, j);
+  return j;
+}
+
+function simTable(rows, L, offset = 0) {
+  if (!rows.length) return `<div class="card empty">없음</div>`;
+  return `<div class="tbl"><table><thead><tr><th>#</th><th class="l">종목</th><th>점수</th><th>상승 비율</th><th>10일 뒤 평균</th>
+    <th>현재가 · 1일</th><th>시총</th><th class="l">이름</th></tr></thead><tbody>${rows.map((r, i) => {
+      const v = r.v;
+      return `<tr data-si="${i + offset}"><td class="n">${i + 1}</td><td class="l tk"><b>${esc(r.t)}</b>${r.box ? `<span class="badge both">박스</span>` : ""}${r.accum ? `<span class="badge both">매집</span>` : ""}</td>
+        <td>${meter(v.score * 10).replace(/<b>[^<]*<\/b>/, `<b>${num(v.score, 1)}</b>`)}</td>
+        <td class="n">${num(v.rise * v.n)}/${v.n} <span class="note">(${num(v.rise * 100)}%)</span></td><td class="n">${pctC(v.avg)}</td>
+        <td class="n">${px(r.price)} ${pctC(r.chg1d)}</td><td class="n">${money(r.mcap)}</td><td class="l wrap">${esc(r.name)}</td></tr>`;
+    }).join("")}</tbody></table></div>`;
+}
+
+async function renderSim() {
+  const main = $("#main");
+  main.onclick = main.oninput = main.onchange = null;
+  if (!S.data.similar) { main.innerHTML = `<div class="card">비슷한 차트 데이터는 다음 자동 실행 때부터 생깁니다.</div>`; return; }
+  if (!S.sim.data) main.innerHTML = `<p class="note">불러오는 중…</p>`;
+  let D;
+  try { D = await loadSim(); } catch (e) { main.innerHTML = `<div class="card">${esc(e.message)}</div>`; return; }
+  if (S.tab !== "similar") return;
+  const L = S.sim.L, q = S.sim.q.trim().toUpperCase();
+  const all = D.rows.map((r) => ({ ...r, v: simVal(r, L) })).filter((r) => r.v && fin(r.v.score));
+  const mc = S.sim.mcap;
+  const shown = all.filter((r) => (mc === "all" || (mc === "small" ? r.mcap < 2e9 : r.mcap >= 2e9))
+    && (!q || r.t.includes(q) || (r.name || "").toUpperCase().includes(q)));
+  const up = [...shown].sort((a, b) => b.v.score - a.v.score);
+  const exact = q ? up.filter((r) => r.t === q) : [];
+  const top = up.slice(0, 30), bottom = [...shown].sort((a, b) => a.v.score - b.v.score).slice(0, 15);
+  const base = D.bases[L === "all" ? "32" : L];
+  const mood = all.reduce((a, r) => a + r.v.score, 0) / (all.length || 1);
+  S.sim.lists = { exact, top, bottom };
+  main.innerHTML = `
+    <p class="note" style="margin:2px 0 8px">지금 차트(최근 8~128거래일)와 가장 닮은 <b>과거 차트 ${D.k}개</b>를 미국 ${all.length.toLocaleString()}개 종목의 지난 5년에서 찾고,
+      그 차트들이 <b>${D.horizon}거래일 뒤</b> 어떻게 됐는지 봅니다 (similarchart.com 방식). 점수 5 = 과거 차트 전체 평균, 높을수록 비슷한 차트들이 많이 올랐다는 뜻입니다.</p>
+    <div class="tiles">
+      <div class="tile"><div class="k">시장 분위기 (평균 점수)</div><div class="v">${num(mood, 2)}</div></div>
+      <div class="tile"><div class="k">상승 예상 (점수 6 이상)</div><div class="v">${all.filter((r) => r.v.score >= 6).length}</div></div>
+      <div class="tile"><div class="k">하락 예상 (점수 4 이하)</div><div class="v">${all.filter((r) => r.v.score <= 4).length}</div></div>
+      <div class="tile"><div class="k">과거 차트 전체 ${D.horizon}일 뒤 상승 확률</div><div class="v">${num(base.rise * 100)}%</div></div>
+    </div>
+    <div class="filters">
+      <span class="seg" id="simL">${SIM_LS.map(([k, t]) => `<button data-l="${k}" class="${L === k ? "on" : ""}">${t}</button>`).join("")}</span>
+      <input type="search" id="simq" placeholder="종목 검색 (예: KRUS)" value="${esc(S.sim.q)}">
+      <label>시총 <select id="simmc">${[["all", "전체"], ["small", "$20억 미만"], ["large", "$20억 이상"]].map(([k, t]) => `<option value="${k}"${mc === k ? " selected" : ""}>${t}</option>`).join("")}</select></label>
+      <span class="note">기준일 ${esc(D.asof)}</span>
+    </div>
+    ${exact.length ? `<h2>검색한 종목</h2>${simTable(exact, L, 0)}` : q && !shown.length ? `<div class="card note">'${esc(q)}' 를 찾지 못했습니다. 시총 $1.5억 이상 미국 종목만 분석합니다.</div>` : ""}
+    <h2>상승 예상 순위 <span class="note">(${L === "all" ? "8~128일 종합" : L + "거래일 차트"})</span></h2>${simTable(top, L, 1000)}
+    <h2>하락 예상 순위</h2>${simTable(bottom, L, 2000)}
+    <p class="note">과거에 비슷한 모양이 그 뒤 어떻게 됐는지일 뿐, 이번에도 같을 거라는 보장은 없습니다. 검증 결과는 '설명' 탭에 있습니다.</p>`;
+  $("#simL").onclick = (e) => { const b = e.target.closest("[data-l]"); if (!b) return; S.sim.L = b.dataset.l; store.set("simL", S.sim.L); if (S.sim.L !== "all") { S.sim.dL = S.sim.L; store.set("simDL", S.sim.dL); } renderSim(); };
+  $("#simq").oninput = (e) => { S.sim.q = e.target.value; const pos = e.target.selectionStart; renderSim().then(() => { const q2 = $("#simq"); if (q2) { q2.focus(); q2.setSelectionRange(pos, pos); } }); };
+  $("#simmc").onchange = (e) => { S.sim.mcap = e.target.value; renderSim(); };
+  main.onclick = (e) => {
+    const tr = e.target.closest("tr[data-si]");
+    if (!tr) return;
+    const k = +tr.dataset.si;
+    const [rows, i] = k >= 2000 ? [bottom, k - 2000] : k >= 1000 ? [top, k - 1000] : [exact, k];
+    openSim(rows, i);
+  };
+}
+
+function openSim(rows, i) {
+  S.cur = { kind: "sim", rows, i };
+  $("#drawer").hidden = false;
+  document.body.style.overflow = "hidden";
+  renderDetail();
+}
+
+async function renderSimDetail() {
+  const { rows, i } = S.cur;
+  const t = rows[i].t;
+  history.replaceState(null, "", `#similar/${t}`);
+  $("#d-pos").textContent = rows.length > 1 ? `비슷한 차트 ${i + 1} / ${rows.length}` : "비슷한 차트";
+  const inList = ["box", "accum"].map((k) => [k, S.data.lists[k].findIndex((r) => r.t === t)]).filter(([, j]) => j >= 0);
+  $("#d-body").innerHTML = `<div class="dh"><div><h2 id="d-title">${esc(t)}</h2><div class="note" id="sim-name"></div></div>
+      <span class="grow"></span><div class="links">${inList.map(([k]) => `<a href="#" data-golist="${k}">${LISTS[k]} 상세 →</a>`).join("")}
+      <a href="https://finance.yahoo.com/quote/${encodeURIComponent(t)}" target="_blank" rel="noopener">야후</a>
+      <a href="https://www.tradingview.com/chart/?symbol=${encodeURIComponent(t)}" target="_blank" rel="noopener">트레이딩뷰</a></div></div>
+    <div class="card" id="simblock"><p class="note">불러오는 중…</p></div>`;
+  $("#d-body").querySelectorAll("[data-golist]").forEach((a) => a.onclick = (e) => {
+    e.preventDefault();
+    const k = a.dataset.golist;
+    openDetail(k, S.data.lists[k], S.data.lists[k].findIndex((r) => r.t === t));
+  });
+  await simBlock(t, $("#simblock"), true);
+}
+
+async function simBlock(t, el, full) {
+  let f;
+  try { f = await loadSimFile(t); } catch (e) { el.innerHTML = `<p class="note">${esc(e.message)}</p>`; return; }
+  if (!el.isConnected) return;
+  const ls = Object.keys(f.w).sort((a, b) => a - b);
+  if (!ls.length) { el.innerHTML = `<p class="note">비슷한 차트를 충분히 찾지 못했습니다.</p>`; return; }
+  const L = f.w[S.sim.dL] ? S.sim.dL : ls.includes("32") ? "32" : ls[0];
+  const w = f.w[L];
+  const nm = $("#sim-name");
+  if (nm) nm.textContent = f.name || "";
+  const up = Math.round(w.rise * w.n);
+  el.innerHTML = `
+    <div class="tbl" style="border:0"><table><thead><tr><th class="l">차트 길이</th><th>점수</th><th>상승 비율</th><th>10일 뒤 평균</th><th>중간값</th><th>평균 유사도</th></tr></thead>
+      <tbody>${ls.map((k) => { const x = f.w[k]; return `<tr data-dl="${k}" class="${k === L ? "sel" : ""}"><td class="l">${k}거래일${k === L ? " ◀" : ""}</td><td class="n"><b>${num(x.score, 1)}</b></td>
+        <td class="n">${Math.round(x.rise * x.n)}/${x.n} (${num(x.rise * 100)}%)</td><td class="n">${pctC(x.avg)}</td><td class="n">${pctC(x.med)}</td><td class="n">${num(x.sim * 100)}%</td></tr>`; }).join("")}</tbody></table></div>
+    <p style="margin:10px 0 4px"><b>${L}거래일</b> 차트와 비슷한 과거 차트 <b>${w.n}개</b> 중 <b class="up">${up}개 (${num(w.rise * 100)}%)</b>가 10거래일 뒤 올랐고, 평균 ${pctC(w.avg)} · 중간값 ${pctC(w.med)} 움직였습니다. 점수 <b>${num(w.score, 1)}</b>.</p>
+    ${fanSvg(w, +L)}
+    <p class="note" style="margin:4px 0 8px">굵은 검은 선 = 지금 ${esc(t)} 차트 · 회색 = 비슷한 과거 차트 ${w.top.length}개 · 그 뒤 10일: <span class="up">빨강 = 오름</span>, <span class="down">파랑 = 내림</span> ·
+      띠 = 비슷한 차트 ${w.n}개의 10일 뒤 범위 (진한 띠 가운데 50%, 연한 띠 80%), 띠 가운데 선 = 중간값. 모든 선은 지금(오늘) 가격 = 0% 로 맞춤.</p>
+    ${full ? `<div class="tbl"><table><thead><tr><th class="l">비슷한 과거 차트</th><th class="l">기간</th><th>유사도</th><th>10일 뒤</th></tr></thead><tbody>
+      ${w.top.map((a) => `<tr><td class="l"><b>${esc(a.t)}</b></td><td class="l">${esc(a.start)} ~ ${esc(a.end)}</td><td class="n">${num(a.s * 100)}%</td><td class="n">${pctC(a.r)}</td></tr>`).join("")}
+      </tbody></table></div>` : `<p class="note"><a href="#similar/${encodeURIComponent(t)}" data-simopen>비슷한 과거 차트 목록 보기 →</a></p>`}`;
+  el.querySelectorAll("tr[data-dl]").forEach((tr) => tr.onclick = () => { S.sim.dL = tr.dataset.dl; store.set("simDL", S.sim.dL); simBlock(t, el, full); });
+  const so = el.querySelector("[data-simopen]");
+  if (so) so.onclick = (e) => { e.preventDefault(); openSim([{ t }], 0); };
+}
+
+function fanSvg(w, L) {
+  const H0 = w.fan.p50.length;
+  const W = 640, H = 300, P = { l: 46, r: 14, t: 12, b: 28 };
+  const ys = [...w.now.w, ...w.fan.p10, ...w.fan.p90, 1];
+  for (const a of w.top) ys.push(...a.w, ...a.f);
+  let lo = Math.min(...ys), hi = Math.max(...ys);
+  const pad = (hi - lo) * 0.06 || 0.02;
+  lo -= pad; hi += pad;
+  const x0 = -(L - 1), x1 = H0;
+  const X = (x) => P.l + ((x - x0) / (x1 - x0)) * (W - P.l - P.r);
+  const Y = (v) => P.t + (1 - (v - lo) / (hi - lo)) * (H - P.t - P.b);
+  const line = (xs, vs) => xs.map((x, i) => `${i ? "L" : "M"}${X(x).toFixed(1)},${Y(vs[i]).toFixed(1)}`).join("");
+  const fx = [0, ...Array.from({ length: H0 }, (_, i) => i + 1)];
+  const band = (a, b) => `M${fx.map((x, i) => `${X(x).toFixed(1)},${Y(i ? w.fan[a][i - 1] : 1).toFixed(1)}`).join("L")}L${fx.slice().reverse().map((x) => { const i = fx.indexOf(x); return `${X(x).toFixed(1)},${Y(i ? w.fan[b][i - 1] : 1).toFixed(1)}`; }).join("L")}Z`;
+  const span = hi - lo, stp = span > 0.8 ? 0.2 : span > 0.4 ? 0.1 : span > 0.16 ? 0.05 : 0.02;
+  let grid = "";
+  for (let v = Math.ceil((lo - 1) / stp) * stp; v <= hi - 1 + 1e-9; v += stp) {
+    const y = Y(1 + v).toFixed(1);
+    grid += `<line x1="${P.l}" x2="${W - P.r}" y1="${y}" y2="${y}" stroke="var(--grid)"/><text x="${P.l - 6}" y="${+y + 4}" text-anchor="end" font-size="11" fill="var(--muted)">${v > 0 ? "+" : ""}${Math.round(v * 100)}%</text>`;
+  }
+  const analogs = w.top.map((a) => `<path d="${line(a.x, a.w)}" fill="none" stroke="var(--muted)" stroke-width="1.2" opacity=".45"/>
+    <path d="${line([0, ...a.f.map((_, i) => i + 1)], [1, ...a.f])}" fill="none" stroke="var(${a.r >= 0 ? "--up" : "--down"})" stroke-width="1.3" opacity=".75"/>`).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block" role="img" aria-label="지금 차트와 비슷한 과거 차트, 그 뒤 10거래일">
+    ${grid}
+    <line x1="${X(0)}" x2="${X(0)}" y1="${P.t}" y2="${H - P.b}" stroke="var(--ink2)" stroke-dasharray="4 4"/>
+    <path d="${band("p10", "p90")}" fill="var(--accent)" opacity=".10"/><path d="${band("p25", "p75")}" fill="var(--accent)" opacity=".20"/>
+    ${analogs}
+    <path d="${line(fx, [1, ...w.fan.p50])}" fill="none" stroke="var(--accent)" stroke-width="2.6"/>
+    <path d="${line(w.now.x, w.now.w)}" fill="none" stroke="var(--ink)" stroke-width="2.6"/>
+    <text x="${X(x0)}" y="${H - 8}" font-size="11" fill="var(--muted)">${L - 1}거래일 전</text>
+    <text x="${X(0)}" y="${H - 8}" font-size="11" fill="var(--ink2)" text-anchor="middle">오늘</text>
+    <text x="${X(x1)}" y="${H - 8}" font-size="11" fill="var(--muted)" text-anchor="end">${H0}거래일 뒤</text>
+  </svg>`;
+}
+
 // ---------------------------------------------------------------- 성과 추적 · 업황 · 설명
 function renderTrack() {
   const T = S.data.tracking;
@@ -702,12 +891,13 @@ function renderHelp() {
       <li><b>앵커드 VWAP</b> 52주 최저점 이후 거래된 평균 가격. 그 위로 올라서면 그 뒤에 산 사람들이 평균적으로 이익 구간.</li></ul>
     <h3>먼저 알아둘 것</h3>
     <ul><li><b>이 목록은 조건 검색 결과이며 매수 추천이 아닙니다.</b></li>
-      <li>과거 검증에서 박스 하단 매수는 3개월 후 시장 대비 +1.9%였지만 통계적으로 의미가 없었고, 박스 아래로 25% 넘게 이탈한 종목은 이후 3개월 시장 대비 −10.7%였습니다.</li>
+      <li><b>쿠라 스시형 박스 하단 과거 검증</b> (2023.10~2026.6, 2개월마다 17개 시점, 그날까지의 데이터로 박스를 다시 찾음, 399건):
+        저점 구간 근처 종목은 <b>3개월 뒤 같은 날 전체 종목 평균보다 +5.2%p</b> 높았습니다 (17개 시점 중 71%, t≈2.3). 1개월 뒤는 +1.7%p 로 확실하지 않습니다.
+        시점이 17개뿐이고 현재 상장된 종목만으로 계산했다는 한계가 있습니다.</li>
       <li>매집 흔적(거래량 쏠림·CMF 등)은 2022.11~2026.6 검증에서 이후 수익률을 예측하지 못했습니다. 소형주는 증자·급등락 위험이 특히 큽니다.</li>
-      <li><b>타이밍 점수 과거 검증</b> (2023.10~2026.6, 2개월마다 17개 시점, 그날까지의 데이터로 다시 계산):
-        박스 하단권은 타이밍 상위 절반이 하위 절반보다 1개월 후 +3.7%p, 3개월 후 +5.2%p 높았고 타이밍 60 이상은 S&amp;P 500 대비 3개월 +11.5% (23개)였지만,
-        표본이 적어 통계적으로 확실하지 않습니다 (t≈0.8). 매집 흔적의 타이밍 점수는 이후 수익률을 예측하지 못했습니다 (60 이상 3개월 −2.0%).
-        현재 상장 종목만으로 계산해서 상장폐지 종목이 빠진 만큼 결과가 좋게 나옵니다. '성과 추적' 탭에 실제 결과가 쌓입니다.</li></ul>
+      <li><b>타이밍 점수 과거 검증</b> (같은 17개 시점): 박스 하단 후보 안에서 타이밍 점수는 순서를 거의 가르지 못했습니다
+        (상위 절반 − 하위 절반: 1개월 +0.9%p, 3개월 −0.2%p). 박스 하단에 있다는 것 자체가 더 중요했습니다.
+        매집 흔적의 타이밍 점수도 이후 수익률을 예측하지 못했습니다 (60 이상 3개월 −2.0%). '성과 추적' 탭에 실제 결과가 쌓입니다.</li></ul>
     <p class="note">데이터: 야후 파이낸스(주가·뉴스·애널리스트·재무), SEC EDGAR(공시). 차트: TradingView Lightweight Charts.</p>
   </div>`;
   $("#main").onclick = $("#main").oninput = $("#main").onchange = null;
@@ -718,6 +908,7 @@ function setTab(tab) {
   S.tab = tab;
   document.querySelectorAll(".tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab));
   if (LISTS[tab]) { renderList(tab); bindList(tab); }
+  else if (tab === "similar") renderSim();
   else if (tab === "track") renderTrack();
   else if (tab === "sector") renderSector();
   else renderHelp();
@@ -738,7 +929,7 @@ async function init() {
     const order = ["auto", "light", "dark"];
     store.set("theme", order[(order.indexOf(store.get("theme", "auto")) + 1) % 3]);
     applyTheme();
-    if (S.cur && !$("#drawer").hidden) drawChart(S.cur.rows[S.cur.i], S.cur.list);
+    if (S.cur && !$("#drawer").hidden) renderDetail();
   };
   try {
     const res = await fetch("data/latest.json", { cache: "no-cache" });
@@ -774,7 +965,8 @@ async function init() {
     else if (e.key === "c" || e.key === "C") toggleCheck();
   });
   const [tab, tk] = decodeURIComponent(location.hash.slice(1)).split("/");
-  setTab(LISTS[tab] || ["track", "sector", "help"].includes(tab) ? tab : "box");
+  setTab(LISTS[tab] || ["similar", "track", "sector", "help"].includes(tab) ? tab : "box");
+  if (tab === "similar" && tk) openSim([{ t: tk }], 0);
   if (tk && LISTS[tab]) {
     const rows = filtered(tab);
     let i = rows.findIndex((r) => r.t === tk);

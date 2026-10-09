@@ -98,6 +98,7 @@ td.wrap { white-space: normal; min-width: 150px; max-width: 260px; }
 tbody tr { cursor: pointer; }
 tbody tr:hover td { background: var(--surface2); }
 tbody tr.checked td { opacity: .55; }
+tbody tr.sel td { background: var(--surface2); font-weight: 600; }
 td.tk { position: sticky; left: 0; background: var(--surface); z-index: 1; }
 tbody tr:hover td.tk { background: var(--surface2); }
 .tk b { font-size: 14px; }
