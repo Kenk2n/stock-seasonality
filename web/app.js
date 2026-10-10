@@ -82,6 +82,12 @@ function tkBadges(r, list) {
   return b;
 }
 
+// 박스 하단권 · 비슷한 차트 분석 범위 설명
+function scopeTxt() {
+  const f = (S.data && S.data.filters) || {};
+  return `시총 ${money(f.box_min_mcap)} · 하루 거래대금 ${money(f.box_min_dv)} · 주가 $${f.box_min_price ?? "–"} 이상 미국 종목`;
+}
+
 // ---------------------------------------------------------------- 필터·정렬
 const BOX_GROUPS = [["5", "4~5년"], ["3", "2~3년"], ["1", "1년"]];
 const groupLabel = (g) => (BOX_GROUPS.find(([k]) => k === g) || [, ""])[1];
@@ -285,7 +291,7 @@ function renderList(list) {
   const nNew = all.filter((r) => r.new).length;
   const nChk = all.filter((r) => isChecked(r.t)).length;
   const intro = list === "box"
-    ? "쿠라 스시형: 1년 · 2~3년 · 4~5년 차트에서 큰 고점(빨강 구간)과 큰 저점(파랑 구간)을 3번 이상 오간 종목 중 지금 저점 구간 근처인 종목입니다 (예: 고점 100·120·90·100, 저점 50·60·40·40). 진폭 = 기준 고점 ÷ 기준 저점. 타이밍 점수는 저점 구간 근접·손익비·RSI·MACD·볼린저·스토캐스틱 RSI·슈퍼트렌드를 합친 값입니다."
+    ? "쿠라 스시형: 1년 · 2~3년 · 4~5년 차트에서 큰 고점(빨강 구간)과 큰 저점(파랑 구간)을 3번 이상 오간 종목 중 지금 저점 구간 근처인 종목입니다 (예: 고점 100·120·90·100, 저점 50·60·40·40). 진폭 = 기준 고점 ÷ 기준 저점. 타이밍 점수는 저점 구간 근접·손익비·RSI·MACD·볼린저·스토캐스틱 RSI·슈퍼트렌드를 합친 값입니다. 소형주까지 포함하므로 필요하면 필터의 '시총'으로 거르세요."
     : "주가는 별로 안 올랐는데 사는 거래량이 쌓이는 종목입니다 (소형주 포함). 타이밍 점수는 매집 순위·변동성 수축·OBV·거래량 증가·추세 회복·RSI를 합친 값입니다.";
   $("#main").innerHTML = `
     <p class="note" style="margin:2px 0 8px">${intro}</p>
@@ -448,7 +454,7 @@ function renderListDetail() {
           <p class="note" style="margin:8px 0 0">RSI ${num(r.ind.rsi)} · 스토캐스틱 RSI ${num(r.ind.stoch_k)} · MFI ${num(r.ind.mfi)} · ADX ${num(r.ind.adx)} · 볼린저 %B ${num(r.ind.bb_pctb, 2)} ·
           50일선 대비 ${pct(r.ind.vs_sma50)} · 200일선 대비 ${pct(r.ind.vs_sma200)} · 하루 변동폭(ATR) ${pct(r.ind.atr_pct, 1, false)} · 슈퍼트렌드 ${r.ind.st_dir === 1 ? "상승" : r.ind.st_dir === -1 ? "하락" : "–"}</p></div>
         <h3>비슷한 차트들로 본 10거래일 뒤</h3>
-        <div class="card" id="simcard">${D.similar && r.sim ? `<p class="note">불러오는 중…</p>` : `<p class="note">이 종목은 비슷한 차트 분석 대상이 아닙니다 (시총 $1.5억 이상 종목만).</p>`}</div>
+        <div class="card" id="simcard">${D.similar && r.sim ? `<p class="note">불러오는 중…</p>` : `<p class="note">이 종목은 비슷한 차트 분석 대상이 아닙니다 (${scopeTxt()}만).</p>`}</div>
         <h3>지금 모양이 비슷한 종목</h3>
         <div class="card" id="shapecard"><p class="note">불러오는 중…</p></div>
         <h3>최근 뉴스</h3>
@@ -697,7 +703,7 @@ async function loadSim() {
 async function loadSimFile(t) {
   if (S.sim.files.has(t)) return S.sim.files.get(t);
   const res = await fetch(`data/similar/${encodeURIComponent(t)}.json`);
-  if (!res.ok) throw new Error(`${t}: 비슷한 차트 분석 대상이 아닙니다 (시총 $1.5억 이상 미국 종목)`);
+  if (!res.ok) throw new Error(`${t}: 비슷한 차트 분석 대상이 아닙니다 (${scopeTxt()})`);
   const j = await res.json();
   S.sim.files.set(t, j);
   return j;
@@ -739,7 +745,7 @@ function mountSearch(input, list) {
       ? head + hits.map((r, i) => `<li role="option" id="${list.id}-${i}" data-i="${i}" aria-selected="${i === at}" class="${i === at ? "on" : ""}">
           <b>${esc(r.t)}</b><span class="nm">${esc(r.name || "")}</span>
           <span class="sc ${r.total >= 6 ? "up" : r.total <= 4 ? "down" : ""}">${fin(r.total) ? num(r.total, 1) : "–"}</span></li>`).join("")
-      : q ? `<li class="gs-none" role="presentation">'${esc(q)}' 없음 · 시총 $1.5억 이상 미국 종목만 분석합니다</li>`
+      : q ? `<li class="gs-none" role="presentation">'${esc(q)}' 없음 · ${scopeTxt()}만 분석합니다</li>`
         : `<li class="gs-none" role="presentation">티커나 회사 이름을 입력하세요. 오른쪽 숫자 = 비슷한 차트 점수 (5 = 평균)</li>`;
     list.hidden = false;
     input.setAttribute("aria-expanded", "true");
@@ -823,7 +829,7 @@ async function renderSim() {
       <label>시총 <select id="simmc">${[["all", "전체"], ["small", "$20억 미만"], ["large", "$20억 이상"]].map(([k, t]) => `<option value="${k}"${mc === k ? " selected" : ""}>${t}</option>`).join("")}</select></label>
       <span class="note">기준일 ${esc(D.asof)}</span>
     </div>
-    ${exact.length ? `<h2>검색한 종목</h2>${simTable(exact, L, 0)}` : q && !shown.length ? `<div class="card note">'${esc(q)}' 를 찾지 못했습니다. 시총 $1.5억 이상 미국 종목만 분석합니다.</div>` : ""}
+    ${exact.length ? `<h2>검색한 종목</h2>${simTable(exact, L, 0)}` : q && !shown.length ? `<div class="card note">'${esc(q)}' 를 찾지 못했습니다. ${scopeTxt()}만 분석합니다.</div>` : ""}
     <h2>상승 예상 순위 <span class="note">(${L === "all" ? "8~128일 종합" : L + "거래일 차트"})</span></h2>${simTable(top, L, 1000)}
     <h2>하락 예상 순위</h2>${simTable(bottom, L, 2000)}
     <p class="note">과거에 비슷한 모양이 그 뒤 어떻게 됐는지일 뿐, 이번에도 같을 거라는 보장은 없습니다. 검증 결과는 '설명' 탭에 있습니다.</p>`;
@@ -1027,7 +1033,7 @@ async function shapeBlock(t, el, p0) {
   if (!el.isConnected) return;
   const st = S.shape || (S.shape = { p: null, box: store.get("shapeBox", false) });
   const ps = SHAPE_PS.filter(([k]) => D.shapes[k] && D.shapes[k][t]);
-  if (!ps.length) { el.innerHTML = `<p class="note">${esc(t)}: 모양 비교 대상이 아닙니다 (시총 $1.5억 이상 종목만, 기간만큼 거래 기록 필요).</p>`; return; }
+  if (!ps.length) { el.innerHTML = `<p class="note">${esc(t)}: 모양 비교 대상이 아닙니다 (${scopeTxt()}만, 기간만큼 거래 기록 필요).</p>`; return; }
   const p = ps.some(([k]) => k === st.p) ? st.p : ps.some(([k]) => k === p0) ? p0 : ps[ps.length - 1][0];
   const hits = shapeMatches(D, t, p, st.box) || [];
   const me = D.shapes[p][t];
@@ -1099,7 +1105,7 @@ function renderHelp() {
       <li>고점들이나 저점들이 시간이 갈수록 한쪽으로 계속 올라가거나 내려가면(추세) 제외. 85% 이상의 날을 박스 근처에서 보내야 합니다.</li>
       <li>차트에서 빨강 ▼ = 고점, 파랑 ▲ = 저점, 빨강 점선 = 고점 구간, 파랑 점선 = 저점 구간입니다. 이 중 지금 저점 구간 근처(박스 위치 −30%~35%)인 종목만 목록에 나옵니다.</li></ul>
     <h3>비슷한 차트 (similarchart.com 방식)</h3>
-    <ul><li>각 종목의 최근 8 · 16 · 32 · 64 · 128거래일 차트와 <b>가장 닮은 과거 차트 50개</b>를 시총 $1.5억 이상 미국 종목(약 3천 개)의 지난 5년에서 찾습니다.
+    <ul><li>각 종목의 최근 8 · 16 · 32 · 64 · 128거래일 차트와 <b>가장 닮은 과거 차트 50개</b>를 ${scopeTxt()} (약 ${(S.data.universe.box || 0).toLocaleString()}개)의 지난 5년에서 찾습니다.
         닮음 = 가격 수준·변동 크기와 상관없는 모양의 상관계수, 하루 변동 크기가 0.5~2배인 차트만, 같은 종목의 겹치는 구간 제외, 한 종목에서 최대 2개.</li>
       <li><b>종목 검색</b>: 맨 위 검색칸에 티커나 회사 이름 (예: KRUS, Kura) → 지금 차트, 비슷한 과거 차트 50개의 10일 뒤 범위, 가장 닮은 과거 차트 6개를 하나씩 그림으로 보여줍니다.
         주소 <code>#similar/KRUS</code> 로 바로 열 수도 있습니다.</li>
@@ -1107,7 +1113,7 @@ function renderHelp() {
         (예: KRUS 5년 차트와 닮은 종목). '박스형 종목만'을 켜면 쿠라 스시형 박스 조건을 통과한 종목 중에서만 찾습니다.</li>
       <li>그 50개가 <b>10거래일 뒤</b> 오른 비율(상승 비율)과 평균 등락으로 <b>점수 0~10</b>을 매깁니다. 5 = 과거 차트 전체 평균, 6 이상 = 상승 예상, 4 이하 = 하락 예상.
         '종합'은 다섯 길이 점수의 평균입니다.</li>
-      <li><b>과거 검증</b> (2024.6~2026.9, 28개 시점 × 250종목, 그날까지 결과가 알려진 차트만 사용): 종합 점수 6 이상은 10거래일 뒤 <b>60.8%</b>가 올랐습니다
+      <li><b>과거 검증</b> (2024.6~2026.9, 28개 시점 × 250종목, 시총 $1.5억 · 주가 $3 이상 종목 기준, 그날까지 결과가 알려진 차트만 사용): 종합 점수 6 이상은 10거래일 뒤 <b>60.8%</b>가 올랐습니다
         (전체 54.6%, 같은 날 평균보다 +1.2%p, 324건). 32거래일 차트 점수 6 이상은 57.5% (+2.2%p). 하지만 점수 전체의 순위 상관은 거의 0 (IC +0.01)이고
         8 · 16 · 64일 점수는 차이가 없었습니다. <b>약한 참고 신호</b>로만 보세요.</li></ul>
     <h3>단계</h3>
@@ -1136,7 +1142,7 @@ function renderHelp() {
       <li><b>앵커드 VWAP</b> 52주 최저점 이후 거래된 평균 가격. 그 위로 올라서면 그 뒤에 산 사람들이 평균적으로 이익 구간.</li></ul>
     <h3>먼저 알아둘 것</h3>
     <ul><li><b>이 목록은 조건 검색 결과이며 매수 추천이 아닙니다.</b></li>
-      <li><b>쿠라 스시형 박스 하단 과거 검증</b> (2023.10~2026.6, 2개월마다 17개 시점, 그날까지의 데이터로 박스를 다시 찾음, 399건):
+      <li><b>쿠라 스시형 박스 하단 과거 검증</b> (2023.10~2026.6, 2개월마다 17개 시점, 그날까지의 데이터로 박스를 다시 찾음, 399건, 시총 $1.5억 · 주가 $3 이상 종목 기준):
         저점 구간 근처 종목은 <b>3개월 뒤 같은 날 전체 종목 평균보다 +5.2%p</b> 높았습니다 (17개 시점 중 71%, t≈2.3). 1개월 뒤는 +1.7%p 로 확실하지 않습니다.
         시점이 17개뿐이고 현재 상장된 종목만으로 계산했다는 한계가 있습니다.</li>
       <li>매집 흔적(거래량 쏠림·CMF 등)은 2022.11~2026.6 검증에서 이후 수익률을 예측하지 못했습니다. 소형주는 증자·급등락 위험이 특히 큽니다.</li>
