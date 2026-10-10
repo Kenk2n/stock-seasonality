@@ -25,6 +25,11 @@
       <h1>주식 후보 모니터</h1>
       <p class="sub" id="meta">불러오는 중…</p>
     </div>
+    <div class="gsearch" role="search">
+      <input type="search" id="gq" placeholder="종목 검색 → 비슷한 차트 (예: KRUS)" autocomplete="off" autocapitalize="characters" spellcheck="false"
+        enterkeyhint="search" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="gq-list" aria-label="종목 검색, 비슷한 차트 보기">
+      <ul class="gs-list" id="gq-list" role="listbox" hidden></ul>
+    </div>
     <button class="icon-btn" id="theme-btn" title="화면 테마 바꾸기" aria-label="화면 테마 바꾸기">◐</button>
   </div>
   <nav class="tabs" role="tablist">
