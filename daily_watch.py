@@ -143,9 +143,10 @@ SHAPE_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_"
 
 def shape_code(c: pd.Series, n: int) -> str | None:
     """최근 n거래일 로그 종가를 SHAPE_POINTS 구간 평균으로 줄이고 최저 0 ~ 최고 63 으로 바꾼 문자열 (그림·모양 비교용)."""
-    v = np.log(c.dropna().to_numpy(dtype=float)[-n:])
-    if len(v) < 0.9 * n or not np.isfinite(v).all():
+    a = c.dropna().to_numpy(dtype=float)[-n:]
+    if len(a) < 0.9 * n or (a <= 0).any():
         return None
+    v = np.log(a)
     b = np.array([x.mean() for x in np.array_split(v, SHAPE_POINTS)])
     lo, hi = b.min(), b.max()
     if hi - lo < 1e-6:

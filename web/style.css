@@ -238,3 +238,4 @@ td.thumb svg { display: block; width: 132px; height: 44px; }
 .analog .nm1 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .analog .badge { margin-left: 0; margin-right: 4px; }
 @media (max-width: 600px) { .shape-me { grid-template-columns: 1fr; gap: 2px; } }
+.analog .af.tags { justify-content: flex-start; flex-wrap: wrap; gap: 2px; }

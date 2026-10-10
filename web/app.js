@@ -1040,9 +1040,10 @@ async function shapeBlock(t, el, p0) {
     ${hits.length ? `<div class="analogs">${hits.map(([s, u]) => `<a class="analog" href="#similar/${encodeURIComponent(u)}" data-shape="${esc(u)}">
         <div class="ah"><b>${esc(u)}</b><span class="note">모양 일치 ${num(s * 100)}%</span></div>
         ${shapeSvg(D, D.shapes[p][u], me)}
-        <div class="af"><span class="note nm1">${esc(D.names[u] || "")}</span></div>${boxTag(D, u) ? `<div class="af">${boxTag(D, u)}</div>` : ""}</a>`).join("")}</div>`
+        <div class="af"><span class="note nm1">${esc(D.names[u] || "")}</span></div>${boxTag(D, u) ? `<div class="af tags">${boxTag(D, u)}</div>` : ""}</a>`).join("")}</div>`
       : `<p class="note">조건에 맞는 종목이 없습니다.</p>`}
-    <p class="note" style="margin:6px 0 0">검은 선 = 그 종목의 같은 기간 모양, 주황 점선 = 지금 ${esc(t)}. 모양 일치 = 가격 수준·변동 크기와 상관없는 모양의 상관계수 (고점·저점의 시기까지 맞아야 높음).
+    <p class="note" style="margin:6px 0 0">검은 선 = 그 종목의 같은 기간 모양, 주황 점선 = 지금 ${esc(t)}. 모양 일치 = 가격 수준·변동 크기와 상관없는 모양의 상관계수입니다. 큰 오르내림의 흐름과 시기가 맞아야 높고, 긴 기간에서는 전체 흐름(올랐다 내림 등)이 크게 작용합니다.
+      '고점·저점이 같은 구간에서 되풀이'되는 종목을 찾으려면 박스 하단권 탭의 '박스 기간'을 쓰거나 아래 '박스형 종목만'을 켜세요.
       박스형만 켜면 쿠라 스시형 박스 조건을 통과한 종목(저점 근처가 아니어도)만 봅니다.</p>`;
   el.querySelector("[data-sp]").onclick = (e) => { const b = e.target.closest("[data-p]"); if (b) { st.p = b.dataset.p; shapeBlock(t, el, p0); } };
   el.querySelector("[data-sbox]").onchange = (e) => { st.box = e.target.checked; store.set("shapeBox", st.box); shapeBlock(t, el, p0); };
