@@ -673,6 +673,76 @@ async function loadSimFile(t) {
   return j;
 }
 
+// ---------------------------------------------------------------- 종목 검색 (similarchart 처럼: 종목을 치면 바로 비슷한 차트)
+function searchMatches(q) {
+  const D = S.sim.data;
+  if (!D) return [];
+  const Q = q.trim().toUpperCase();
+  if (!Q) {
+    const by = new Map(D.rows.map((r) => [r.t, r]));
+    return store.get("recent", []).map((t) => by.get(t)).filter(Boolean);
+  }
+  const hit = [];
+  for (const r of D.rows) {
+    const nm = (r.name || "").toUpperCase();
+    const k = r.t === Q ? 0 : r.t.startsWith(Q) ? 1 : nm.startsWith(Q) ? 2 : r.t.includes(Q) ? 3 : nm.includes(Q) ? 4 : -1;
+    if (k >= 0) hit.push([k, r]);
+  }
+  return hit.sort((a, b) => a[0] - b[0] || a[1].t.length - b[1].t.length || b[1].mcap - a[1].mcap).slice(0, 8).map((x) => x[1]);
+}
+
+function openSearched(r) {
+  store.set("recent", [r.t, ...store.get("recent", []).filter((t) => t !== r.t)].slice(0, 8));
+  openSim([r], 0);
+}
+
+// 입력칸 하나에 자동완성 목록을 붙인다 (상단 검색, 비슷한 차트 상세 안 검색)
+function mountSearch(input, list) {
+  let hits = [], at = -1;
+  const close = () => { list.hidden = true; input.setAttribute("aria-expanded", "false"); at = -1; };
+  const draw = () => {
+    const q = input.value.trim();
+    hits = searchMatches(q);
+    if (at >= hits.length) at = hits.length - 1;
+    const head = !q && hits.length ? `<li class="gs-head" role="presentation">최근 검색</li>` : "";
+    list.innerHTML = hits.length
+      ? head + hits.map((r, i) => `<li role="option" id="${list.id}-${i}" data-i="${i}" aria-selected="${i === at}" class="${i === at ? "on" : ""}">
+          <b>${esc(r.t)}</b><span class="nm">${esc(r.name || "")}</span>
+          <span class="sc ${r.total >= 6 ? "up" : r.total <= 4 ? "down" : ""}">${fin(r.total) ? num(r.total, 1) : "–"}</span></li>`).join("")
+      : q ? `<li class="gs-none" role="presentation">'${esc(q)}' 없음 · 시총 $1.5억 이상 미국 종목만 분석합니다</li>`
+        : `<li class="gs-none" role="presentation">티커나 회사 이름을 입력하세요. 오른쪽 숫자 = 비슷한 차트 점수 (5 = 평균)</li>`;
+    list.hidden = false;
+    input.setAttribute("aria-expanded", "true");
+    if (at >= 0) input.setAttribute("aria-activedescendant", `${list.id}-${at}`); else input.removeAttribute("aria-activedescendant");
+  };
+  const ready = async () => {
+    if (!S.data || !S.data.similar) { list.innerHTML = `<li class="gs-none">비슷한 차트 데이터는 다음 자동 실행 때부터 생깁니다.</li>`; list.hidden = false; return false; }
+    if (!S.sim.data) {
+      list.innerHTML = `<li class="gs-none">불러오는 중…</li>`; list.hidden = false;
+      try { await loadSim(); } catch (e) { list.innerHTML = `<li class="gs-none">${esc(e.message)}</li>`; return false; }
+    }
+    return true;
+  };
+  const pick = (r) => { input.value = ""; close(); input.blur(); openSearched(r); };
+  input.addEventListener("focus", async () => { if (await ready() && document.activeElement === input) draw(); });
+  input.addEventListener("input", async () => { at = -1; if (await ready()) draw(); });
+  input.addEventListener("blur", () => setTimeout(close, 150));
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { input.value = ""; close(); input.blur(); return; }
+    if (list.hidden || !hits.length) return;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      at = (at + (e.key === "ArrowDown" ? 1 : -1) + hits.length) % hits.length;
+      draw();
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      pick(hits[Math.max(at, 0)]);
+    }
+  });
+  list.addEventListener("mousedown", (e) => e.preventDefault());  // 목록 누를 때 입력칸 blur 로 닫히지 않게
+  list.addEventListener("click", (e) => { const li = e.target.closest("li[data-i]"); if (li) pick(hits[+li.dataset.i]); });
+}
+
 function simTable(rows, L, offset = 0) {
   if (!rows.length) return `<div class="card empty">없음</div>`;
   return `<div class="tbl"><table><thead><tr><th>#</th><th class="l">종목</th><th>점수</th><th>상승 비율</th><th>10일 뒤 평균</th>
@@ -706,7 +776,8 @@ async function renderSim() {
   S.sim.lists = { exact, top, bottom };
   main.innerHTML = `
     <p class="note" style="margin:2px 0 8px">지금 차트(최근 8~128거래일)와 가장 닮은 <b>과거 차트 ${D.k}개</b>를 미국 ${all.length.toLocaleString()}개 종목의 지난 5년에서 찾고,
-      그 차트들이 <b>${D.horizon}거래일 뒤</b> 어떻게 됐는지 봅니다 (similarchart.com 방식). 점수 5 = 과거 차트 전체 평균, 높을수록 비슷한 차트들이 많이 올랐다는 뜻입니다.</p>
+      그 차트들이 <b>${D.horizon}거래일 뒤</b> 어떻게 됐는지 봅니다 (similarchart.com 방식). 점수 5 = 과거 차트 전체 평균, 높을수록 비슷한 차트들이 많이 올랐다는 뜻입니다.
+      <b>맨 위 검색칸</b>에 아무 종목이나 치면 (어느 탭에서든, 단축키 /) 그 종목의 비슷한 차트가 바로 열립니다.</p>
     <div class="tiles">
       <div class="tile"><div class="k">시장 분위기 (평균 점수)</div><div class="v">${num(mood, 2)}</div></div>
       <div class="tile"><div class="k">상승 예상 (점수 6 이상)</div><div class="v">${all.filter((r) => r.v.score >= 6).length}</div></div>
@@ -752,7 +823,13 @@ async function renderSimDetail() {
       <span class="grow"></span><div class="links">${inList.map(([k]) => `<a href="#" data-golist="${k}">${LISTS[k]} 상세 →</a>`).join("")}
       <a href="https://finance.yahoo.com/quote/${encodeURIComponent(t)}" target="_blank" rel="noopener">야후</a>
       <a href="https://www.tradingview.com/chart/?symbol=${encodeURIComponent(t)}" target="_blank" rel="noopener">트레이딩뷰</a></div></div>
+    <div class="gsearch in-detail" role="search">
+      <input type="search" id="dq" placeholder="다른 종목 검색" autocomplete="off" autocapitalize="characters" spellcheck="false" enterkeyhint="search"
+        role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="dq-list" aria-label="다른 종목 검색">
+      <ul class="gs-list" id="dq-list" role="listbox" hidden></ul>
+    </div>
     <div class="card" id="simblock"><p class="note">불러오는 중…</p></div>`;
+  mountSearch($("#dq"), $("#dq-list"));
   $("#d-body").querySelectorAll("[data-golist]").forEach((a) => a.onclick = (e) => {
     e.preventDefault();
     const k = a.dataset.golist;
@@ -780,12 +857,38 @@ async function simBlock(t, el, full) {
     ${fanSvg(w, +L)}
     <p class="note" style="margin:4px 0 8px">굵은 검은 선 = 지금 ${esc(t)} 차트 · 회색 = 비슷한 과거 차트 ${w.top.length}개 · 그 뒤 10일: <span class="up">빨강 = 오름</span>, <span class="down">파랑 = 내림</span> ·
       보라 띠 = 비슷한 차트 ${w.n}개의 10일 뒤 범위 (진한 띠 가운데 50%, 연한 띠 80%), 보라 선 = 중간값. 모든 선은 지금(오늘) 가격 = 0% 로 맞춤.</p>
-    ${full ? `<div class="tbl"><table><thead><tr><th class="l">비슷한 과거 차트</th><th class="l">기간</th><th>유사도</th><th>10일 뒤</th></tr></thead><tbody>
-      ${w.top.map((a) => `<tr><td class="l"><b>${esc(a.t)}</b></td><td class="l">${esc(a.start)} ~ ${esc(a.end)}</td><td class="n">${num(a.s * 100)}%</td><td class="n">${pctC(a.r)}</td></tr>`).join("")}
-      </tbody></table></div>` : `<p class="note"><a href="#similar/${encodeURIComponent(t)}" data-simopen>비슷한 과거 차트 목록 보기 →</a></p>`}`;
+    ${full ? `<h3>가장 닮은 과거 차트 ${w.top.length}개</h3>
+      <p class="note" style="margin:0 0 6px">검은 선 = 그 종목의 과거 차트, 주황 점선 = 지금 ${esc(t)} 차트 (겹쳐 비교), 오른쪽 = 그 뒤 10거래일 (<span class="up">빨강 오름</span> / <span class="down">파랑 내림</span>).</p>
+      <div class="analogs">${w.top.map((a) => `<a class="analog" href="https://www.tradingview.com/chart/?symbol=${encodeURIComponent(a.t)}" target="_blank" rel="noopener" title="${esc(a.t)} 차트 열기">
+        <div class="ah"><b>${esc(a.t)}</b><span class="note">${esc(shortD(a.start))} ~ ${esc(shortD(a.end))}</span></div>
+        ${analogSvg(a, w.now)}
+        <div class="af"><span class="note">유사도 ${num(a.s * 100)}%</span><span>10일 뒤 ${pctC(a.r)}</span></div></a>`).join("")}</div>` : `<p class="note"><a href="#similar/${encodeURIComponent(t)}" data-simopen>비슷한 과거 차트 목록 보기 →</a></p>`}`;
   el.querySelectorAll("tr[data-dl]").forEach((tr) => tr.onclick = () => { S.sim.dL = tr.dataset.dl; store.set("simDL", S.sim.dL); simBlock(t, el, full); });
   const so = el.querySelector("[data-simopen]");
   if (so) so.onclick = (e) => { e.preventDefault(); openSim([{ t }], 0); };
+}
+
+const shortD = (d) => String(d || "").slice(2).replace(/-/g, ".");
+
+// 과거 차트 하나: 그 구간 모양 + 지금 차트 겹침 + 그 뒤 10일
+function analogSvg(a, now) {
+  const W = 220, H = 110, P = { l: 4, r: 4, t: 6, b: 6 };
+  const fx = [0, ...a.f.map((_, i) => i + 1)], fv = [1, ...a.f];
+  const ys = [...a.w, ...a.f, ...now.w];
+  let lo = Math.min(...ys), hi = Math.max(...ys);
+  const pad = (hi - lo) * 0.06 || 0.02;
+  lo -= pad; hi += pad;
+  const x0 = Math.min(a.x[0], now.x[0]), x1 = fx[fx.length - 1];
+  const X = (x) => P.l + ((x - x0) / (x1 - x0)) * (W - P.l - P.r);
+  const Y = (v) => P.t + (1 - (v - lo) / (hi - lo)) * (H - P.t - P.b);
+  const line = (xs, vs) => xs.map((x, i) => `${i ? "L" : "M"}${X(x).toFixed(1)},${Y(vs[i]).toFixed(1)}`).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block" role="img" aria-label="${esc(a.t)} 과거 차트와 그 뒤 10거래일">
+    <line x1="${P.l}" x2="${W - P.r}" y1="${Y(1).toFixed(1)}" y2="${Y(1).toFixed(1)}" stroke="var(--grid)"/>
+    <line x1="${X(0).toFixed(1)}" x2="${X(0).toFixed(1)}" y1="${P.t}" y2="${H - P.b}" stroke="var(--line)" stroke-dasharray="3 3"/>
+    <path d="${line(now.x, now.w)}" fill="none" stroke="var(--s-orange)" stroke-width="1.4" stroke-dasharray="4 3" opacity=".9"/>
+    <path d="${line(a.x, a.w)}" fill="none" stroke="var(--ink)" stroke-width="1.7"/>
+    <path d="${line(fx, fv)}" fill="none" stroke="var(${a.r >= 0 ? "--up" : "--down"})" stroke-width="2"/>
+  </svg>`;
 }
 
 function fanSvg(w, L) {
@@ -869,6 +972,8 @@ function renderHelp() {
     <h3>비슷한 차트 (similarchart.com 방식)</h3>
     <ul><li>각 종목의 최근 8 · 16 · 32 · 64 · 128거래일 차트와 <b>가장 닮은 과거 차트 50개</b>를 시총 $1.5억 이상 미국 종목(약 3천 개)의 지난 5년에서 찾습니다.
         닮음 = 가격 수준·변동 크기와 상관없는 모양의 상관계수, 하루 변동 크기가 0.5~2배인 차트만, 같은 종목의 겹치는 구간 제외, 한 종목에서 최대 2개.</li>
+      <li><b>종목 검색</b>: 맨 위 검색칸에 티커나 회사 이름 (예: KRUS, Kura) → 지금 차트, 비슷한 과거 차트 50개의 10일 뒤 범위, 가장 닮은 과거 차트 6개를 하나씩 그림으로 보여줍니다.
+        주소 <code>#similar/KRUS</code> 로 바로 열 수도 있습니다.</li>
       <li>그 50개가 <b>10거래일 뒤</b> 오른 비율(상승 비율)과 평균 등락으로 <b>점수 0~10</b>을 매깁니다. 5 = 과거 차트 전체 평균, 6 이상 = 상승 예상, 4 이하 = 하락 예상.
         '종합'은 다섯 길이 점수의 평균입니다.</li>
       <li><b>과거 검증</b> (2024.6~2026.9, 28개 시점 × 250종목, 그날까지 결과가 알려진 차트만 사용): 종합 점수 6 이상은 10거래일 뒤 <b>60.8%</b>가 올랐습니다
@@ -949,6 +1054,7 @@ async function init() {
   }
   const D = S.data;
   $("#meta").textContent = `기준일 ${D.asof} (미국 장 마감) · 갱신 ${D.updated} KST · 미국 ${D.universe.all.toLocaleString()}개 종목 중 박스 하단권 ${D.lists.box.length} · 매집 흔적 ${D.lists.accum.length}`;
+  mountSearch($("#gq"), $("#gq-list"));
   $("#main").addEventListener("toggle", (e) => { if (e.target.matches("details.fwrap")) S.fopen = e.target.open; }, true);
   document.querySelector(".tabs").onclick = (e) => { const b = e.target.closest("[data-tab]"); if (b) { history.replaceState(null, "", "#" + b.dataset.tab); setTab(b.dataset.tab); } };
   $("#drawer").onclick = (e) => {
@@ -966,6 +1072,12 @@ async function init() {
     touch = null;
     if (Math.abs(dx) > 70 && Math.abs(dy) < 50) navDetail(dx < 0 ? 1 : -1);
   }, { passive: true });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "/" && !/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) {
+      const q = $("#drawer").hidden ? $("#gq") : $("#dq");
+      if (q) { e.preventDefault(); q.focus(); }
+    }
+  });
   document.addEventListener("keydown", (e) => {
     if ($("#drawer").hidden || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
     if (e.key === "Escape") closeDetail();
