@@ -34,6 +34,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from seasonality import accumulation as acc  # noqa: E402
 from seasonality import data, earnings, indicators, picks, risk, timing, universe, watch  # noqa: E402
 from seasonality import similar as sim  # noqa: E402
+from seasonality import swingbox as sb  # noqa: E402
 
 KST = timezone(timedelta(hours=9))
 log = logging.getLogger("daily_watch")
@@ -117,11 +118,15 @@ def chart_payload(t: str, df: pd.DataFrame, ind: pd.DataFrame, eds, box_row=None
         "first_seen": first_seen,
     }
     if box_row is not None:
-        start = df.index[-1] - pd.DateOffset(years=int(box_row["years"]))
-        out["box"] = {"lm": box_row["lm"], "hm": box_row["hm"], "low_zone": list(box_row["low_zone"]),
-                      "high_zone": list(box_row["high_zone"]), "start": start.strftime("%Y-%m-%d"),
-                      "stop": box_row["stop"], "target": box_row["target"], "swings": box_row["swings"]}
+        out["box"] = chart_box(df, box_row)
     return out
+
+
+def chart_box(df: pd.DataFrame, r) -> dict:
+    start = df.index[-1] - pd.DateOffset(years=int(r["years"]))
+    return {"years": int(r["years"]), "lm": r["lm"], "hm": r["hm"], "low_zone": list(r["low_zone"]),
+            "high_zone": list(r["high_zone"]), "start": start.strftime("%Y-%m-%d"),
+            "stop": r["stop"], "target": r["target"], "swings": r["swings"]}
 
 
 def weekly_spark(c: pd.Series, years: int, asof: pd.Timestamp) -> dict:
@@ -129,6 +134,24 @@ def weekly_spark(c: pd.Series, years: int, asof: pd.Timestamp) -> dict:
     w = c[c.index > asof - pd.DateOffset(years=years)].resample("W-FRI").last().dropna()
     return {"start": w.index[0].strftime("%Y-%m-%d"), "end": w.index[-1].strftime("%Y-%m-%d"),
             "v": rlist(w, price_decimals(c))}
+
+
+SHAPE_PERIODS = {"6M": 126, "1Y": 252, "3Y": 756, "5Y": 1260}  # 지금 모양이 비슷한 종목 찾기용 기간 (거래일)
+SHAPE_POINTS = 64
+SHAPE_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_"  # 64단계 → 한 글자
+
+
+def shape_code(c: pd.Series, n: int) -> str | None:
+    """최근 n거래일 로그 종가를 SHAPE_POINTS 구간 평균으로 줄이고 최저 0 ~ 최고 63 으로 바꾼 문자열 (그림·모양 비교용)."""
+    v = np.log(c.dropna().to_numpy(dtype=float)[-n:])
+    if len(v) < 0.9 * n or not np.isfinite(v).all():
+        return None
+    b = np.array([x.mean() for x in np.array_split(v, SHAPE_POINTS)])
+    lo, hi = b.min(), b.max()
+    if hi - lo < 1e-6:
+        return None
+    q = np.round((b - lo) / (hi - lo) * 63).astype(int)
+    return "".join(SHAPE_CHARS[i] for i in q)
 
 
 SIM_TOP = 6  # 종목마다 그림으로 보여 줄 비슷한 과거 차트 수 (길이마다)
@@ -176,7 +199,7 @@ def main() -> int:
     p.add_argument("--acc-min-dv", type=float, default=2e5)
     p.add_argument("--acc-min-price", type=float, default=0.5)
     p.add_argument("--acc-top", type=int, default=40)
-    p.add_argument("--box-max", type=int, default=40)
+    p.add_argument("--box-max", type=int, default=25, help="박스 기간 묶음마다 최대 후보 수")
     p.add_argument("--lookback", type=int, default=180, help="성과 추적 기간(일)")
     p.add_argument("--cache-days", type=float, default=7)
     p.add_argument("--no-similar", action="store_true", help="비슷한 차트 계산 건너뛰기 (개발용)")
@@ -206,13 +229,26 @@ def main() -> int:
     step(f"주가 {len(prices)}개 · 기준일 {asof:%Y-%m-%d}")
 
     # 2) 박스 하단 후보
-    box_prices = {t: prices[t] for t in set(box_meta.index) | {picks.REF} if t in prices and len(prices[t]) > 500}
+    box_prices = {t: prices[t] for t in set(box_meta.index) | {picks.REF} if t in prices and len(prices[t]) > 260}
     sig = acc.panel(prices)
     box_snap = acc.snapshot({t: sig[t] for t in box_prices if t in sig}, asof, args.box_min_price, args.box_min_dv)
-    box = picks.box_scan(box_prices, asof)
-    box_x, eds = picks.box_candidates(box_prices, box, box_snap, asof)
-    box_x = box_x.head(args.box_max)
-    step(f"쿠라 스시형 박스 {len(box)}개 → 저점 구간 근처 {len(box_x)}개")
+    # 박스 기간 묶음(4~5년 · 2~3년 · 1년)마다 따로 찾고, 종목마다 가장 긴 기간의 박스를 기본으로 보여 준다
+    groups = sb.scan_groups(box_prices, asof)
+    box_groups: dict[str, list[str]] = {}
+    for g, bx in groups.items():
+        for t in bx.index:
+            box_groups.setdefault(t, []).append(g)
+    cands, eds = {}, {}
+    for g, bx in groups.items():
+        cx, e = picks.box_candidates(box_prices, bx, box_snap, asof)
+        eds.update(e)
+        cands[g] = cx.head(args.box_max).assign(group=g) if len(cx) else cx
+    main_rows = []
+    for g in sb.GROUPS:  # "5" → "3" → "1"
+        main_rows += [r for t, r in cands[g].iterrows() if t not in {m.name for m in main_rows}] if len(cands[g]) else []
+    box_x = pd.DataFrame(main_rows).sort_values("raw", ascending=False) if main_rows else pd.DataFrame()
+    step("쿠라 스시형 박스 " + " · ".join(f"{g}년 묶음 {len(groups[g])}개 (저점 근처 {len(cands[g])})" for g in sb.GROUPS)
+         + f" → 후보 {len(box_x)}종목")
 
     # 3) 매집 흔적 (소형주 포함)
     snap = acc.snapshot(sig, asof, args.acc_min_price, args.acc_min_dv)
@@ -300,28 +336,40 @@ def main() -> int:
             "filings": [f for f in sec.get(t, []) if (asof - pd.Timestamp(f["date"])).days <= 60][:8],
         }
 
-    rows = {"box": [], "accum": []}
-    for t, r in box_x.iterrows():
-        df = box_prices[t]
-        ind = indicators.compute(df)
+    def box_view(df, ind, r, risk_level) -> dict:
+        """박스 하나 (기간 묶음 하나) 기준의 표시 값: 박스 지표·주봉 그림·타이밍."""
         tm = timing.box_timing(df, ind, r["pos"], r["stop"], r["target"])
-        row = common(t, df, ind, floor=r["low_zone"][0])
         ok = [x for x in r["swings"] if x["ok"]]
-        row.update({
-            "score": r["raw"], "timing": tm["timing"], "parts": tm["parts"], "rr": tm["rr"], "stop": tm["stop"],
-            "target": tm["target"], "stage": timing.stage(tm["timing"], row["risk"]["level"]),
+        return {
+            "timing": tm["timing"], "parts": tm["parts"], "rr": tm["rr"], "stop": tm["stop"], "target": tm["target"],
+            "stage": timing.stage(tm["timing"], risk_level),
             "box": {**{k: r[k] for k in ("years", "amp", "lm", "hm", "round_trips", "n_high", "n_low", "pos",
                                          "to_target", "to_stop", "valid_frac", "inside")},
                     "low_zone": list(r["low_zone"]), "high_zone": list(r["high_zone"]),
                     "highs": [x["p"] for x in ok if x["k"] == "H"], "lows": [x["p"] for x in ok if x["k"] == "L"],
                     "swings": r["swings"]},
-            "is_ref": bool(r["is_ref"]), "spark_w": weekly_spark(df["Close"], int(r["years"]), asof),
+            "spark_w": weekly_spark(df["Close"], int(r["years"]), asof),
+        }
+
+    rows = {"box": [], "accum": []}
+    for t, r in box_x.iterrows():
+        df = box_prices[t]
+        ind = indicators.compute(df)
+        row = common(t, df, ind, floor=r["low_zone"][0])
+        alts = {g: cands[g].loc[t] for g in sb.GROUPS if len(cands[g]) and t in cands[g].index}
+        row.update(box_view(df, ind, r, row["risk"]["level"]))
+        row.update({
+            "score": r["raw"], "group": r["group"],
+            "boxes": {g: box_view(df, ind, a, row["risk"]["level"]) for g, a in alts.items()},
+            "is_ref": bool(r["is_ref"]),
             "krus": r["earn_dist"], "s": {k[2:]: r[k] for k in r.index if k.startswith("s_")},
             "stealth": r["stealth"], "cmf": r["cmf"], "vol_ratio": r["vol_ratio"], "in_accum": t in acc_x.index,
             "new": t in new["box"], "streak": streak["box"].get(t, 1), "first_seen": first_seen["box"].get(t),
         })
         rows["box"].append(row)
-        write_json(charts_dir / f"{t}.json", chart_payload(t, df, ind, eds.get(t, []), r, row["first_seen"]))
+        cp = chart_payload(t, df, ind, eds.get(t, []), r, row["first_seen"])
+        cp["boxes"] = {g: chart_box(df, a) for g, a in alts.items()}
+        write_json(charts_dir / f"{t}.json", cp)
     for t, r in acc_x.iterrows():
         df = prices[t]
         ind = indicators.compute(df)
@@ -365,6 +413,19 @@ def main() -> int:
         write_json(sim_dir / "summary.json", {"asof": asof, "lengths": list(sim.LENGTHS), "horizon": sim.HORIZON,
                                               "k": sim.K, "bases": sim_bases, "rows": srows})
         step(f"비슷한 차트 저장: {len(srows)}종목")
+    # 지금 모양(6개월·1년·3년·5년)이 비슷한 종목 찾기 + 목록 썸네일용 모양
+    shp_px = {**box_prices, **{t: prices[t] for t in acc_x.index if t in prices}}
+    shapes = {p: {} for p in SHAPE_PERIODS}
+    for t, df in shp_px.items():
+        for p, n in SHAPE_PERIODS.items():
+            code = shape_code(df["Close"], n)
+            if code:
+                shapes[p][t] = code
+    write_json(sim_dir / "shapes.json", {
+        "asof": asof, "points": SHAPE_POINTS, "chars": SHAPE_CHARS, "periods": SHAPE_PERIODS, "shapes": shapes,
+        "names": {t: meta["name"].get(t, "") for t in shp_px}, "box": box_groups,
+        "groups": {g: list(y) for g, y in sb.GROUPS.items()}})
+    step(f"모양 저장: " + " · ".join(f"{p} {len(v)}" for p, v in shapes.items()))
 
     # 8) 이전 후보 성과
     recent = hist[hist["date"] >= asof - pd.Timedelta(days=args.lookback)]
@@ -385,7 +446,8 @@ def main() -> int:
     hist.to_csv(hist_path, index=False, date_format="%Y-%m-%d")
     latest = {
         "asof": asof, "updated": datetime.now(KST).strftime("%Y-%m-%d %H:%M"),
-        "universe": {"all": len(meta), "box": len(box_prices), "box_patterns": len(box), "accum": len(snap)},
+        "universe": {"all": len(meta), "box": len(box_prices), "box_patterns": len(box_groups),
+                     "box_groups": {g: len(x) for g, x in groups.items()}, "accum": len(snap)},
         "filters": {k: v for k, v in vars(args).items() if k.startswith(("box_", "acc_"))},
         "lists": rows,
         "changes": {k: {"new": sorted(new[k]), "dropped": new[k + "_dropped"]} for k in watch.LIST_NAMES},

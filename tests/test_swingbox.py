@@ -48,3 +48,13 @@ def test_scan_picks_best_period():
     df = pd.DataFrame({"Close": c})
     res = sb.scan({"AAA": df, "BBB": pd.DataFrame({"Close": c * 0 + 10.0})}, c.index[-1], years=(3, 4))
     assert list(res.index) == ["AAA"] and res.loc["AAA", "box_years"] in (3, 4)
+
+
+def test_one_year_box_group():
+    # 1년 동안 40 ↔ 58 (1.45배) 을 세 번 넘게 오감: 5년 기준(진폭 1.8배)에는 못 들지만 1년 묶음에는 든다
+    c = _path([48, 58, 40, 57, 41, 59, 40, 58, 41, 43], days_per_leg=28)
+    end = c.index[-1]
+    got = sb.scan_groups({"X": pd.DataFrame({"Close": c})}, end)
+    assert "X" in got["1"].index and got["1"].loc["X", "box_years"] == 1
+    assert len(got["5"]) == 0
+    assert -0.3 < got["1"].loc["X", "pos"] < 0.35
