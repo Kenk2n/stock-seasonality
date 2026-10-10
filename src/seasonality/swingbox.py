@@ -37,7 +37,8 @@ def swing_box(close: pd.Series, start=None, end=None, threshold: float = 0.25) -
         s = s[s.index > pd.Timestamp(start)]
     if end is not None:
         s = s[s.index <= pd.Timestamp(end)]
-    if len(s) < 400 or (s <= 0).any():
+    req = (pd.Timestamp(end) - pd.Timestamp(start)).days / 365.25 if start is not None and end is not None else 2
+    if len(s) < min(400, 200 * max(req, 1)) or (s <= 0).any():  # 1년 박스는 200일, 2년 이상은 400일 이상
         return None
     sw = find_swings(s, threshold)
     sw = _with_pending(sw, s, threshold)
@@ -190,3 +191,30 @@ def scan(prices: dict[str, pd.DataFrame], end: pd.Timestamp, years=(3, 4, 5), th
             rows.append(best)
     out = pd.DataFrame(rows)
     return out.set_index("ticker").sort_values("score", ascending=False) if len(out) else out
+
+
+# 박스 기간 묶음: 기간(년) → (스윙 기준 되돌림, 최소 진폭). 짧은 기간은 작은 박스도 인정.
+PERIOD_PARAMS = {1: (0.15, 1.4), 2: (0.20, 1.6), 3: (0.25, 1.8), 4: (0.25, 1.8), 5: (0.25, 1.8)}
+GROUPS = {"5": (4, 5), "3": (2, 3), "1": (1,)}  # 화면 필터: 4~5년 · 2~3년 · 1년
+
+
+def scan_groups(prices: dict[str, pd.DataFrame], end: pd.Timestamp) -> dict[str, pd.DataFrame]:
+    """기간 묶음마다 종목별로 점수가 가장 높은 쿠라 스시형 박스 (조건 통과한 것만, index = ticker)."""
+    out = {}
+    for g, years in GROUPS.items():
+        rows = []
+        for t, df in prices.items():
+            best = None
+            for y in years:
+                th, amp = PERIOD_PARAMS[y]
+                m = swing_box(df["Close"], end - pd.DateOffset(years=y), end, th)
+                if not passes(m, min_amp=amp):
+                    continue
+                sc = score(m)
+                if best is None or sc > best["score"]:
+                    best = {"ticker": t, "box_years": y, "score": sc, **m}
+            if best:
+                rows.append(best)
+        x = pd.DataFrame(rows)
+        out[g] = x.set_index("ticker").sort_values("score", ascending=False) if len(x) else x
+    return out

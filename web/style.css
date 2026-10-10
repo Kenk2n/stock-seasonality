@@ -227,3 +227,15 @@ button, .chip, .seg button, .tabs button { touch-action: manipulation; }
   .dh h2 { font-size: 20px; }
   #d-body { padding: 4px 12px 60px; }
 }
+
+/* ---------- 표 안 차트 썸네일 */
+td.thumb { padding-top: 4px; padding-bottom: 4px; }
+td.thumb svg { display: block; width: 132px; height: 44px; }
+@media (max-width: 600px) { td.thumb svg { width: 96px; height: 36px; } }
+.bp-row { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin: 4px 0 8px; }
+.bp-row .seg button .note { font-size: 11px; margin-left: 2px; }
+.shape-me { display: grid; grid-template-columns: minmax(0, 260px) 1fr; gap: 10px; align-items: center; margin: 0 0 10px; }
+.analog .nm1 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.analog .badge { margin-left: 0; margin-right: 4px; }
+@media (max-width: 600px) { .shape-me { grid-template-columns: 1fr; gap: 2px; } }
+.analog .af.tags { justify-content: flex-start; flex-wrap: wrap; gap: 2px; }
