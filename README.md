@@ -79,6 +79,17 @@ python box_picks.py --min-mcap 2e8 --min-dollar-volume 3e6     # 조금 넓게
 3·4·5년 박스 왕복형 중 지금 박스 하단(위치 −20%~30%)에 있는 종목을 점수(박스 품질 35 · 하단 근접 20 ·
 KRUS 닮음 20 · 매집 흔적 15 · 거래량 증가 10 − 위험 감점)로 줄 세우고, 기관·공매도·내부자·다음 실적일과 함께 보여줍니다.
 
+## 오늘의 탐색 (반복 실행용)
+
+```bash
+python box_picks.py --min-mcap 2e8 --min-dollar-volume 3e6 --top 20 --refresh --out reports/box_picks_$(date +%m%d).html
+python watch.py reports/box_picks_1007.csv --base-date 2026-10-07 --labels labels.csv --refresh   # 지난 목록 추적
+python election_daily.py --refresh                                                             # 선거 전후 일별 비교
+```
+
+`watch.py` 는 예전에 뽑은 목록(CSV)이 그 뒤 얼마나 움직였는지, 같은 박스 안 위치, 박스 깨짐(하단 −10% 아래 종가),
+그 사이 나온 실적 반응과 다음 실적일을 보여줍니다. `--labels` 로 그룹 이름(ticker,label CSV)을 붙일 수 있습니다.
+
 ## 매집 흔적 스캐너 (+ 백테스트)
 
 주가·거래량에 남는 매집 흔적(주가 대비 거래량 쏠림, CMF, 흡수형 대량거래, 변동성 수축)과
@@ -189,6 +200,7 @@ earnings_scan.py           실적 주기 패턴이 비슷한 종목 찾기
 accumulation_scan.py       매집 흔적 스캐너 + 백테스트
 range_scan.py              박스권 왕복 종목 찾기
 box_picks.py               박스 하단 후보 (박스 + 거래량 + 매집 + KRUS 유사도, 위험 감점)
+watch.py                   지난 목록 추적 (등락, 박스 위치·깨짐, 실적 반응)
 midterm_report.py          미국 중간선거 전후 주가 리포트
 election_month.py          선거일 전후 1개월 예상 범위 (중간선거·대선별, 시장 상태 조건부)
 election_daily.py          선거 전후 ±21거래일 일별 변동, 올해 vs 과거 범위
