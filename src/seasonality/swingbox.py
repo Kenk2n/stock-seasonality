@@ -31,7 +31,7 @@ HIGH_Z_MAX, LOW_Z_MIN = 1.6, -0.6  # 이보다 크게 벗어난 고점·저점�
 MIN_LEG = 0.5                      # 왕복 한 번으로 세려면 박스 높이(로그)의 절반 이상 움직여야 함
 
 
-def swing_box(close: pd.Series, start=None, end=None, threshold: float = 0.25) -> dict | None:
+def swing_box(close: pd.Series, start=None, end=None, threshold: float = 0.25, min_ratio: float = 1.2) -> dict | None:
     s = close.dropna()
     if start is not None:
         s = s[s.index > pd.Timestamp(start)]
@@ -49,7 +49,7 @@ def swing_box(close: pd.Series, start=None, end=None, threshold: float = 0.25) -
     hp, lp = hi["price"].to_numpy(), lo["price"].to_numpy()
     hm, lm = float(np.median(hp)), float(np.median(lp))
     for _ in range(2):  # 기준 고점·저점을 제 구간에 닿은 스윙만으로 다시 잡는다 (작은 출렁임 제외)
-        if hm <= lm * 1.2:
+        if hm <= lm * min_ratio:
             return None
         width = np.log(hm / lm)
         zh, zl = np.log(hp / lm) / width, np.log(lp / lm) / width
