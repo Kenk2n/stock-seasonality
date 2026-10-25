@@ -1,7 +1,7 @@
 """관심 종목 추적: 기준일에 뽑은 목록(box_picks.py 결과 CSV)이 그 뒤 어떻게 됐는지.
 
-  python watch.py reports/box_picks.csv                       # 기준 CSV 대비 지금
-  python watch.py old.csv --labels labels.csv --refresh       # 그룹 이름 붙이기, 가격·실적일 새로 받기
+  python track_list.py reports/box_picks.csv                       # 기준 CSV 대비 지금
+  python track_list.py old.csv --labels labels.csv --refresh       # 그룹 이름 붙이기, 가격·실적일 새로 받기
 
 계산: 기준일 이후 등락(시장 대비), 같은 박스 안 위치, 박스 이탈 여부(하단 −10% 아래 종가),
 기준일 이후 나온 실적의 반응(발표 전날 → 다음날), 다음 실적일.
@@ -61,7 +61,7 @@ def main() -> int:
     p.add_argument("--labels", help="ticker,label 열이 있는 CSV (그룹 이름)")
     p.add_argument("--base-date", help="기준일 YYYY-MM-DD (목록을 뽑은 날. 기본: 데이터 마지막 날의 14일 전)")
     p.add_argument("--refresh", action="store_true", help="가격·실적일 새로 받기")
-    p.add_argument("--out", default="reports/watch.html")
+    p.add_argument("--out", default="reports/track_list.html")
     p.add_argument("--inline-js", action="store_true")
     args = p.parse_args()
     logging.getLogger("yfinance").setLevel(logging.CRITICAL)

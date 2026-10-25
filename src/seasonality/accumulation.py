@@ -153,6 +153,20 @@ def holder_info(ticker: str) -> dict:
             "short_float": info.get("shortPercentOfFloat"),
             "short_change": (info["sharesShort"] / info["sharesShortPriorMonth"] - 1)
             if info.get("sharesShort") and info.get("sharesShortPriorMonth") else None,
+            # 위험 점검용 재무·애널리스트 정보
+            "long_name": info.get("longName") or info.get("shortName"),
+            "country": info.get("country"),
+            "summary": (info.get("longBusinessSummary") or "")[:400],
+            "total_cash": info.get("totalCash"),
+            "free_cashflow": info.get("freeCashflow"),
+            "profit_margins": info.get("profitMargins"),
+            "revenue_growth": info.get("revenueGrowth"),
+            "debt_to_equity": info.get("debtToEquity"),
+            "current_ratio": info.get("currentRatio"),
+            "recommendation": info.get("recommendationKey"),
+            "target_mean": info.get("targetMeanPrice"),
+            "n_analysts": info.get("numberOfAnalystOpinions"),
+            "float_shares": info.get("floatShares"),
         })
     except Exception:
         pass
