@@ -1,0 +1,16 @@
+{
+  "name": "주식 후보 모니터",
+  "short_name": "후보 모니터",
+  "description": "쿠라 스시형 박스 하단권 · 매집 흔적 후보를 매일 매수 타이밍 순으로",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f6f6f3",
+  "theme_color": "#2a78d6",
+  "lang": "ko",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
